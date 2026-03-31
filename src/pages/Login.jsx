@@ -56,21 +56,18 @@ export default function Login() {
                 transition={{ duration: 0.8, ease: 'easeOut' }}
                 className="w-full max-w-md"
             >
-                {/* Logo & Header */}
-                <div className="text-center mb-10">
-                    <motion.div 
-                        initial={{ scale: 0.8 }}
-                        animate={{ scale: 1 }}
-                        className="w-20 h-20 bg-blue-600 rounded-[2.5rem] flex items-center justify-center text-white text-4xl mx-auto mb-6 shadow-2xl shadow-blue-500/20"
-                    >
-                        <FiShield />
-                    </motion.div>
-                    <h1 className="text-4xl font-black text-slate-900 tracking-tight uppercase mb-2">CRM JST</h1>
-                    <p className="text-slate-500 font-medium">Internal Operations Management System</p>
-                </div>
-
                 {/* Login Card */}
                 <div className="bg-white border border-slate-200 rounded-[3rem] p-10 shadow-2xl shadow-slate-200/50 relative overflow-hidden backdrop-blur-xl bg-white/80">
+                    <div className="text-center mb-10">
+                        <div className="flex justify-center items-center gap-6 mb-8">
+                            <img src="/Logo/jst.png" alt="JST Logo" className="h-12 object-contain" />
+                            <div className="w-[1px] h-8 bg-slate-200" />
+                            <img src="/Logo/wahana.png" alt="Wahana Logo" className="h-10 object-contain" />
+                        </div>
+                        <h1 className="text-3xl font-black text-slate-900 tracking-tight uppercase mb-1">CRM JST</h1>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Internal Operations</p>
+                    </div>
+
                     <form onSubmit={handleLogin} className="space-y-6 relative z-10">
                         {error && (
                             <motion.div 
