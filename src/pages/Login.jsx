@@ -100,7 +100,7 @@ export default function Login() {
                 className="w-full max-w-md relative z-10"
             >
                 {/* High-Energy Glass Card */}
-                <div className="bg-white/80 border border-white rounded-[3.5rem] p-12 shadow-[0_32px_64px_-16px_rgba(30,41,59,0.1)] backdrop-blur-2xl relative overflow-hidden group">
+                <div className="bg-white/80 border border-white rounded-[3.5rem] p-12 shadow-[0_50px_100px_-20px_rgba(15,23,42,0.15),0_30px_60px_-30px_rgba(0,0,0,0.3)] backdrop-blur-2xl relative overflow-hidden group">
                     {/* Interior Radiance */}
                     <div className="absolute -top-32 -left-32 w-64 h-64 bg-blue-100/50 rounded-full blur-[80px] pointer-events-none transition-all duration-1000 group-hover:scale-110" />
                     

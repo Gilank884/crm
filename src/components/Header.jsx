@@ -1,6 +1,5 @@
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { FiMap, FiRefreshCw } from 'react-icons/fi';
 
 export default function Header() {
     return (
@@ -9,9 +8,13 @@ export default function Header() {
                 initial={{ x: -50, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
                 transition={{ duration: 0.4 }}
-                className="flex items-center gap-4"
+                className="flex items-center gap-6"
             >
-                <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-black text-white shadow-lg shadow-blue-200">JST</div>
+                <div className="flex items-center gap-4 py-2 px-4 bg-slate-50 rounded-xl border border-slate-100 shadow-sm">
+                    <img src="/Logo/jst.png" alt="JST Logo" className="h-8 object-contain" />
+                    <div className="w-[1px] h-6 bg-slate-200" />
+                    <img src="/Logo/wahana.png" alt="Wahana Logo" className="h-6 object-contain" />
+                </div>
                 <div>
                     <div className="text-lg font-black tracking-tight text-slate-900 leading-none mb-1">CRM JST</div>
                     <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Monitoring & Systems</div>
@@ -24,15 +27,7 @@ export default function Header() {
                 transition={{ duration: 0.4 }}
                 className="flex items-center gap-4"
             >
-                <Link to="/map" className="flex items-center gap-2 px-5 py-2 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-slate-100 transition-all border border-slate-100 shadow-sm">
-                    <FiMap className="text-sm" /> Map
-                </Link>
-                <button 
-                    onClick={() => window.location.reload()}
-                    className="btn-dongker shadow-blue-100 flex items-center gap-2"
-                >
-                    <FiRefreshCw className="text-sm" /> Refresh
-                </button>
+                {/* Navigation items removed per request */}
             </motion.nav>
         </header>
     );
