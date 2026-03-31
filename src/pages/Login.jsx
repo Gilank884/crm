@@ -50,7 +50,7 @@ export default function Login() {
                 <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/5 rounded-full blur-[120px]" />
             </div>
 
-            <motion.div 
+            <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.8, ease: 'easeOut' }}
@@ -70,7 +70,7 @@ export default function Login() {
 
                     <form onSubmit={handleLogin} className="space-y-6 relative z-10">
                         {error && (
-                            <motion.div 
+                            <motion.div
                                 initial={{ opacity: 0, x: -10 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 className="bg-red-50 border border-red-100 text-red-600 text-xs font-black uppercase tracking-widest p-4 rounded-2xl text-center"
@@ -86,9 +86,9 @@ export default function Login() {
                                     <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-blue-600 transition-colors">
                                         <FiUser fontSize={18} />
                                     </div>
-                                    <input 
+                                    <input
                                         required
-                                        type="text" 
+                                        type="text"
                                         value={npp}
                                         onChange={(e) => setNpp(e.target.value)}
                                         placeholder="Masukkan NPP Anda"
@@ -103,9 +103,9 @@ export default function Login() {
                                     <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-blue-600 transition-colors">
                                         <FiLock fontSize={18} />
                                     </div>
-                                    <input 
+                                    <input
                                         required
-                                        type="password" 
+                                        type="password"
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
                                         placeholder="••••••••"
@@ -115,7 +115,7 @@ export default function Login() {
                             </div>
                         </div>
 
-                        <button 
+                        <button
                             disabled={loading}
                             type="submit"
                             className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black text-xs tracking-[0.2em] uppercase shadow-xl shadow-blue-500/30 hover:shadow-blue-500/40 active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed group"
