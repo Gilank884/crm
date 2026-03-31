@@ -1,28 +1,48 @@
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { FiHome, FiUsers, FiBox, FiCalendar, FiArrowRight } from 'react-icons/fi';
+import { FiHome, FiUsers, FiBox, FiCalendar, FiArrowRight, FiActivity } from 'react-icons/fi';
 import { supabase } from '../supabaseClient';
+import { 
+    BarChart, 
+    Bar, 
+    XAxis, 
+    YAxis, 
+    CartesianGrid, 
+    Tooltip, 
+    ResponsiveContainer, 
+    Cell,
+    Legend
+} from 'recharts';
 
 const moduleConfig = [
     { name: 'Monitor Kanwil', path: '/kanwil', icon: FiHome, desc: 'Daftar Kantor Wilayah operasional', table: 'kanwils' },
     { name: 'Database Teknisi', path: '/technicians', icon: FiUsers, desc: 'Data personil per Kanwil', table: 'technicians' },
-    { name: 'Kelolaan Pasti', path: '/assets', icon: FiBox, desc: 'Daftar site & aset tetap', table: 'managed_assets' },
+    { name: 'Master Data', path: '/assets', icon: FiBox, desc: 'Daftar site & aset tetap', table: 'managed_assets' },
     { name: 'Monthly PM & CM', path: '/maintenance', icon: FiCalendar, desc: 'Tracking maintenance bulanan', table: 'maintenance_tasks' },
 ];
 
 export default function Dashboard() {
     const navigate = useNavigate();
     const [counts, setCounts] = useState({});
-    const [maintStats, setMaintStats] = useState({ pm: { total: 0, done: 0 }, cm: { total: 0, done: 0 } });
+    const [chartData, setChartData] = useState([]);
+    const [openTasks, setOpenTasks] = useState([]);
     const [loading, setLoading] = useState(true);
-    const currentPeriod = new Date().toISOString().slice(0, 7);
+    
+    // Date Range State
+    const [startDate, setStartDate] = useState(() => {
+        const d = new Date();
+        return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+    });
+    const [endDate, setEndDate] = useState(() => {
+        const d = new Date();
+        return new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+    });
 
     useEffect(() => {
         const fetchAllStats = async () => {
             setLoading(true);
             
-            // 1. Fetch Module Counts
             const results = {};
             for (const mod of moduleConfig) {
                 const { count, error } = await supabase
@@ -32,125 +52,319 @@ export default function Dashboard() {
             }
             setCounts(results);
 
-            // 2. Fetch Maintenance Stats for Current Period
             const { data: mData, error: mError } = await supabase
                 .from('maintenance_tasks')
-                .select('type, status')
-                .eq('period', currentPeriod);
+                .select(`
+                    completed_date,
+                    managed_assets (
+                        kanwils ( name )
+                    )
+                `)
+                .gte('scheduled_date', startDate)
+                .lte('scheduled_date', endDate)
+                .limit(2000);
             
             if (!mError && mData) {
-                const stats = { pm: { total: 0, done: 0 }, cm: { total: 0, done: 0 } };
+                const regionalMap = {};
                 mData.forEach(task => {
-                    const typeKey = task.type.toLowerCase(); // pm or cm
-                    if (stats[typeKey]) {
-                        stats[typeKey].total++;
-                        if (task.status === 'completed') stats[typeKey].done++;
+                    const kanwilName = task.managed_assets?.kanwils?.name || 'Unknown';
+                    if (!regionalMap[kanwilName]) {
+                        regionalMap[kanwilName] = { name: kanwilName, close: 0, open: 0 };
+                    }
+                    if (task.completed_date) {
+                        regionalMap[kanwilName].close++;
+                    } else {
+                        regionalMap[kanwilName].open++;
                     }
                 });
-                setMaintStats(stats);
+                setChartData(Object.values(regionalMap).sort((a, b) => b.close - a.close));
+            }
+
+            const { data: openTasksData, error: openTasksError } = await supabase
+                .from('maintenance_tasks')
+                .select(`
+                    *,
+                    managed_assets ( name, tid, location )
+                `)
+                .gte('scheduled_date', startDate)
+                .lte('scheduled_date', endDate)
+                .is('completed_date', null)
+                .order('scheduled_date', { ascending: true })
+                .limit(10);
+            
+            if (!openTasksError && openTasksData) {
+                setOpenTasks(openTasksData);
             }
 
             setLoading(false);
         };
         fetchAllStats();
-    }, []);
+    }, [startDate, endDate]);
+
 
     return (
-        <div className="p-10 max-w-7xl mx-auto">
-            <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-14 border-b border-slate-200 pb-10">
-                <div className="flex items-center gap-3 mb-4">
-                    <span className="w-3 h-10 bg-blue-600 rounded-full shadow-lg shadow-blue-500/20" />
-                    <h1 className="text-5xl font-black tracking-tight text-slate-900">Operational Dashboard</h1>
+        <div className="p-6 max-w-6xl mx-auto selection:bg-blue-100">
+            {/* COMPACT HEADER */}
+            <motion.div 
+                initial={{ opacity: 0, y: -10 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                className="mb-8 border-b border-slate-100 pb-6 flex flex-col md:flex-row justify-between items-start md:items-end gap-6"
+            >
+                <div>
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="w-1.5 h-6 bg-blue-600 rounded-full" />
+                        <h1 className="text-3xl font-black tracking-tight text-slate-900 uppercase leading-none">Dashboard Overview</h1>
+                    </div>
                 </div>
-                <p className="text-slate-500 text-lg font-medium">Selamat datang kembali. Kelola operasional JST dengan presisi dan transparansi.</p>
+
+                <div className="flex bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm h-[46px] group hover:border-blue-500 transition-all">
+                    <div className="flex items-center px-4 bg-slate-50 border-r border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest gap-2 group-hover:bg-blue-50 group-hover:text-blue-600 transition-all">
+                         <FiCalendar /> Dari
+                    </div>
+                    <input 
+                        type="date" 
+                        value={startDate} 
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="px-4 text-[10px] font-black uppercase tracking-widest text-slate-700 outline-none w-36 cursor-pointer" 
+                    />
+                    <div className="flex items-center px-4 bg-slate-50 border-x border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest gap-2 group-hover:bg-blue-50 group-hover:text-blue-600 transition-all">
+                         Sampai
+                    </div>
+                    <input 
+                        type="date" 
+                        value={endDate} 
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="px-4 text-[10px] font-black uppercase tracking-widest text-slate-700 outline-none w-36 cursor-pointer" 
+                    />
+                </div>
             </motion.div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8 mb-16">
+            {/* COMPACT MODULE GRID */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
                 {moduleConfig.map((mod, idx) => (
-                    /* ... (Keep existing navigation cards) ... */
                     <motion.button
                         key={mod.path}
-                        initial={{ opacity: 0, y: 20 }}
+                        initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: idx * 0.1 }}
+                        transition={{ delay: idx * 0.05 }}
                         onClick={() => navigate(mod.path)}
-                        className="group relative p-10 bg-white border border-slate-200 rounded-[3rem] hover:border-blue-600 transition-all duration-500 text-left shadow-xl shadow-slate-200/50 flex flex-col gap-8 overflow-hidden h-full hover:-translate-y-2 active:scale-95"
+                        className="group relative p-6 bg-white border border-slate-100 rounded-3xl hover:border-blue-500 hover:shadow-2xl hover:shadow-blue-500/10 transition-all duration-300 text-left shadow-sm flex flex-col gap-4 overflow-hidden h-full active:scale-[0.98]"
                     >
-                        <div className="w-16 h-16 bg-slate-50 rounded-3xl flex items-center justify-center text-slate-400 text-3xl group-hover:bg-blue-600 group-hover:text-white group-hover:shadow-xl group-hover:shadow-blue-200 transition-all duration-500">
+                        <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 text-xl group-hover:bg-blue-600 group-hover:text-white transition-colors duration-300">
                             <mod.icon />
                         </div>
                         
                         <div>
-                            <h3 className="text-2xl font-black text-slate-900 mb-3 group-hover:text-blue-700 transition-colors uppercase tracking-tight leading-tight">{mod.name}</h3>
-                            <p className="text-sm text-slate-500 font-medium leading-relaxed mb-8">{mod.desc}</p>
+                            <h3 className="text-sm font-black text-slate-900 mb-1 uppercase tracking-tight">{mod.name}</h3>
+                            <p className="text-[10px] text-slate-400 font-bold leading-tight mb-4">{mod.desc}</p>
                             
-                            <div className="flex items-center justify-between mt-auto pt-6 border-t border-slate-100">
+                            <div className="flex items-center justify-between mt-auto">
                                 {loading ? (
-                                    <div className="w-16 h-6 bg-slate-100 animate-pulse rounded-full" />
+                                    <div className="w-12 h-5 bg-slate-50 animate-pulse rounded-lg" />
                                 ) : (
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-2xl font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-xl border border-blue-100">{counts[mod.name] || 0}</span>
-                                        <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Records</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg font-black text-blue-600">{counts[mod.name] || 0}</span>
+                                        <span className="text-[8px] text-slate-300 uppercase font-black tracking-widest">Records</span>
                                     </div>
                                 )}
-                                <div className="p-3 bg-slate-50 rounded-full text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-all transform group-hover:translate-x-2">
-                                    <FiArrowRight fontSize={20} />
+                                <div className="p-2 bg-slate-50 rounded-lg text-slate-400 group-hover:text-blue-600 transition-colors">
+                                    <FiArrowRight fontSize={14} />
                                 </div>
                             </div>
-                        </div>
-
-                        <div className="absolute top-0 right-0 p-8 opacity-[0.02] group-hover:opacity-10 transition-opacity">
-                            <span className="text-[10rem] font-black leading-none">{idx + 1}</span>
                         </div>
                     </motion.button>
                 ))}
             </div>
 
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}>
-                <div className="flex items-center justify-between mb-8">
-                    <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Maintenance Performance <span className="text-slate-400 text-sm font-bold ml-2">({currentPeriod})</span></h2>
+            {/* PERFORMANCE DIAGRAM */}
+            <motion.div 
+                initial={{ opacity: 0, y: 10 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                transition={{ delay: 0.3 }}
+                className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm"
+            >
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl shadow-sm border border-blue-100">
+                            <FiActivity fontSize={20} />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight leading-tight">Regional Performance</h2>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">Mastery vs Pending Grouped By Kanwil</p>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-4">
+                        <div className="bg-green-50 border border-green-100 rounded-2xl px-5 py-2 flex flex-col items-center">
+                            <span className="text-[8px] font-black text-green-600 uppercase tracking-widest mb-0.5">Grand Total Close</span>
+                            <span className="text-lg font-black text-green-700 leading-none">{chartData.reduce((acc, curr) => acc + curr.close, 0)}</span>
+                        </div>
+                        <div className="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-2 flex flex-col items-center">
+                            <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest mb-0.5">Grand Total Open</span>
+                            <span className="text-lg font-black text-amber-700 leading-none">{chartData.reduce((acc, curr) => acc + curr.open, 0)}</span>
+                        </div>
+                    </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {['PM', 'CM'].map(type => {
-                        const stats = maintStats[type.toLowerCase()];
-                        const percent = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
-                        
-                        // Explicit classes for Tailwind JIT
-                        const theme = type === 'PM' 
-                            ? { text: 'text-blue-600', bg: 'bg-blue-600', shadow: 'shadow-blue-400/30' }
-                            : { text: 'text-amber-600', bg: 'bg-amber-600', shadow: 'shadow-amber-400/30' };
-                        
-                        return (
-                            <div key={type} className="bg-white border border-slate-200 rounded-[3rem] p-10 shadow-xl shadow-slate-200/50">
-                                <div className="flex justify-between items-start mb-8">
-                                    <div>
-                                        <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-2">{type} Mastery</h3>
-                                        <p className="text-sm font-medium text-slate-400">Pencapaian target maintenance rutin {type === 'PM' ? 'bulanan' : 'perbaikan'}.</p>
-                                    </div>
-                                    <div className={`text-4xl font-black ${theme.text}`}>{percent}%</div>
-                                </div>
+                <div className="flex flex-col lg:flex-row gap-8">
+                    {/* CHART LEFT */}
+                    <div className="flex-1 h-[400px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                                data={chartData}
+                                layout="vertical"
+                                margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                                barGap={8}
+                            >
+                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                                <XAxis 
+                                    type="number"
+                                    axisLine={false} 
+                                    tickLine={false} 
+                                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }}
+                                />
+                                <YAxis 
+                                    dataKey="name" 
+                                    type="category"
+                                    axisLine={false} 
+                                    tickLine={false} 
+                                    width={100}
+                                    tick={{ fill: '#475569', fontSize: 10, fontWeight: 900 }}
+                                />
+                                <Tooltip 
+                                    cursor={{ fill: '#f8fafc' }}
+                                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '11px', fontWeight: 'bold' }}
+                                />
+                                <Legend 
+                                    verticalAlign="top" 
+                                    align="right" 
+                                    iconType="circle"
+                                    wrapperStyle={{ paddingBottom: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase' }}
+                                />
+                                <Bar 
+                                    dataKey="close" 
+                                    name="Close (Done)" 
+                                    fill="#16a34a" 
+                                    radius={[0, 4, 4, 0]} 
+                                    barSize={16}
+                                />
+                                <Bar 
+                                    dataKey="open" 
+                                    name="Open (Pending)" 
+                                    fill="#f59e0b" 
+                                    radius={[0, 4, 4, 0]} 
+                                    barSize={16}
+                                />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
 
-                                <div className="space-y-4">
-                                    <div className="flex justify-between text-[10px] uppercase font-black tracking-widest text-slate-500">
-                                        <span>Completion Status</span>
-                                        <span>{stats.done} / {stats.total} Tasks</span>
-                                    </div>
-                                    <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden">
-                                        <motion.div 
-                                            initial={{ width: 0 }} 
-                                            animate={{ width: `${percent}%` }}
-                                            transition={{ duration: 1, ease: 'easeOut' }}
-                                            className={`h-full ${theme.bg} rounded-full shadow-lg ${theme.shadow}`}
-                                        />
+                    {/* SUMMARY TABLE RIGHT */}
+                    <div className="lg:w-80 bg-slate-50 rounded-3xl p-6 border border-slate-100 flex flex-col">
+                        <div className="flex items-center justify-between mb-6 border-b border-slate-200 pb-2">
+                            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Regional Summary</div>
+                            <div className="bg-white px-2 py-0.5 rounded-md border border-slate-200 text-[9px] font-black text-slate-400 uppercase tracking-widest">{chartData.length} REGIONS</div>
+                        </div>
+                        <div className="flex-1 space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
+                            {chartData.map((reg, i) => (
+                                <div key={i} className="flex flex-col gap-2 p-3 bg-white rounded-2xl border border-slate-200/50 shadow-sm">
+                                    <div className="text-[11px] font-black text-slate-900 uppercase truncate">{reg.name}</div>
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-1.5">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-green-600" />
+                                            <span className="text-[10px] font-black text-green-600">{reg.close} Close</span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                            <span className="text-[10px] font-black text-amber-600">{reg.open} Open</span>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        );
-                    })}
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-center gap-8 mt-10 pt-6 border-t border-slate-50">
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-green-600" />
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Region Full Target</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-amber-500" />
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Region Needs Field Visit</span>
+                    </div>
+                </div>
+            </motion.div>
+            
+            {/* OPEN TASKS LIST */}
+            <motion.div 
+                initial={{ opacity: 0, y: 10 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                transition={{ delay: 0.4 }}
+                className="mt-10 bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm"
+            >
+                <div className="flex items-center justify-between mb-8">
+                    <div>
+                        <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
+                             <div className="w-2 h-6 bg-amber-500 rounded-full" /> Open Maintenance Tasks
+                        </h2>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Pending schedules requiring field visit</p>
+                    </div>
+                    <button 
+                        onClick={() => navigate('/maintenance')}
+                        className="px-6 py-2 bg-slate-50 text-slate-500 rounded-xl font-black text-[10px] tracking-widest uppercase hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                    >
+                        View Tracker
+                    </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-slate-50 text-slate-400 uppercase text-[9px] tracking-widest font-black border-b border-slate-100">
+                            <tr>
+                                <th className="px-6 py-4">Asset ID</th>
+                                <th className="px-6 py-4">Site Name</th>
+                                <th className="px-6 py-4 text-center">Category</th>
+                                <th className="px-6 py-4 text-center">Scheduled</th>
+                                <th className="px-6 py-4 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50 font-bold">
+                            {loading ? (
+                                [1,2,3].map(i => <tr key={i} className="animate-pulse h-12 text-slate-100"><td colSpan="5" className="px-6 font-mono text-[9px]">LOADING...</td></tr>)
+                            ) : openTasks.length === 0 ? (
+                                <tr><td colSpan="5" className="py-12 text-center text-slate-300 text-[10px] uppercase font-black tracking-widest italic">All set! No pending tasks found.</td></tr>
+                            ) : (
+                                openTasks.map(task => (
+                                    <tr key={task.id} className="hover:bg-slate-50/50 transition-colors group">
+                                        <td className="px-6 py-4">
+                                            <span className="font-mono font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-[10px] uppercase border border-blue-100">{task.managed_assets?.tid || '---'}</span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="text-xs text-slate-900 tracking-tight">{task.managed_assets?.name}</div>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase border ${task.type === 'PM' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>{task.type}</span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className="text-[10px] text-slate-400 font-black">{task.scheduled_date}</span>
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <button 
+                                                onClick={() => navigate('/maintenance')}
+                                                className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-sm"
+                                            >
+                                                <FiArrowRight fontSize={14} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
                 </div>
             </motion.div>
         </div>
     );
 }
-

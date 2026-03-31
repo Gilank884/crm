@@ -6,7 +6,7 @@ const navItems = [
     { name: 'Dashboard', path: '/dashboard', icon: FiAirplay },
     { name: 'Monitor Kanwil', path: '/kanwil', icon: FiGrid },
     { name: 'Database Teknisi', path: '/technicians', icon: FiUsers },
-    { name: 'Kelolaan Pasti', path: '/assets', icon: FiBox },
+    { name: 'Master Data', path: '/assets', icon: FiBox },
     { name: 'Monthly PM & CM', path: '/maintenance', icon: FiCalendar },
 ];
 
@@ -20,7 +20,7 @@ export default function Sidebar() {
     };
 
     return (
-        <aside className="w-72 bg-white min-h-screen sticky top-0 p-6 flex flex-col gap-6 overflow-y-auto border-r border-slate-200 shadow-sm transition-all duration-300">
+        <aside className="w-72 bg-white h-full sticky top-0 p-6 flex flex-col gap-6 overflow-y-auto border-r border-slate-200 shadow-sm transition-all duration-300">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}>
                 <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 px-2">Main Menu</h2>
                 <div className="flex flex-col gap-2">
