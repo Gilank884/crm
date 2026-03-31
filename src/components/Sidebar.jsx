@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiAirplay, FiGrid, FiUsers, FiBox, FiCalendar } from 'react-icons/fi';
+import { FiAirplay, FiGrid, FiUsers, FiBox, FiCalendar, FiLogOut } from 'react-icons/fi';
 
 const navItems = [
     { name: 'Dashboard', path: '/dashboard', icon: FiAirplay },
@@ -13,6 +13,11 @@ const navItems = [
 export default function Sidebar() {
     const navigate = useNavigate();
     const location = useLocation();
+
+    const handleLogout = () => {
+        localStorage.removeItem('user');
+        navigate('/login');
+    };
 
     return (
         <aside className="w-72 bg-white min-h-screen sticky top-0 p-6 flex flex-col gap-6 overflow-y-auto border-r border-slate-200 shadow-sm transition-all duration-300">
@@ -38,8 +43,18 @@ export default function Sidebar() {
                 </div>
             </motion.div>
 
-            <div className="mt-auto pt-6 border-t border-slate-100 text-[10px] font-bold text-slate-400 px-2 uppercase tracking-tight">
-                Refocused CRM JST v1.0
+            <div className="mt-auto flex flex-col gap-4">
+                <button 
+                    onClick={handleLogout}
+                    className="flex items-center gap-4 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 transition-all font-semibold text-sm group"
+                >
+                    <FiLogOut className="text-xl transition-transform group-hover:-translate-x-1" />
+                    <span>Logout Account</span>
+                </button>
+                
+                <div className="pt-6 border-t border-slate-100 text-[10px] font-bold text-slate-400 px-2 uppercase tracking-tight">
+                    Refocused CRM JST v1.0
+                </div>
             </div>
         </aside>
     );
