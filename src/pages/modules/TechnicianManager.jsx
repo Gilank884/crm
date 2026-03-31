@@ -1,11 +1,12 @@
 import { motion } from 'framer-motion';
 import { useEffect, useState, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { FiUsers, FiUpload, FiPlus, FiPhone, FiBriefcase, FiTrash2, FiEdit3, FiBox } from 'react-icons/fi';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile } from '../../utils/excelHandler';
 
 export default function TechnicianManager() {
+    const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef(null);
     const [technicians, setTechnicians] = useState([]);
@@ -212,10 +213,14 @@ export default function TechnicianManager() {
                                         </div>
                                     </td>
                                     <td className="px-8 py-6 text-center">
-                                        <div className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-slate-900 uppercase tracking-tight">
-                                            <FiBox className="text-blue-600" />
-                                            <span className="font-black">{tech.managed_assets?.[0]?.count || 0}</span>
-                                        </div>
+                                        <button 
+                                            onClick={() => navigate(`/assets?pic_id=${tech.id}`)}
+                                            className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-blue-600 uppercase tracking-tight hover:bg-blue-50 px-3 py-1.5 rounded-lg border border-transparent hover:border-blue-100 transition-all cursor-pointer mx-auto"
+                                            title="Click to view all assets for this technician"
+                                        >
+                                            <FiBox />
+                                            <span className="font-black underline decoration-blue-200 underline-offset-4">{tech.managed_assets?.[0]?.count || 0}</span>
+                                        </button>
                                     </td>
                                     <td className="px-8 py-6 text-center">
                                         <div className="flex items-center justify-center gap-1.5 font-mono text-xs font-bold text-blue-600/70">

@@ -1,11 +1,12 @@
 import { motion } from 'framer-motion';
 import { useEffect, useState, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { FiUpload, FiPlus, FiUser, FiMapPin, FiActivity } from 'react-icons/fi';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { FiUpload, FiPlus, FiUser, FiMapPin, FiActivity, FiXCircle } from 'react-icons/fi';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile } from '../../utils/excelHandler';
 
 export default function AssetInventory() {
+    const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef(null);
     const [assets, setAssets] = useState([]);
@@ -33,7 +34,11 @@ export default function AssetInventory() {
         setTechnicians(techData || []);
         
         const urlKanwil = searchParams.get('kanwil');
-        if (urlKanwil) {
+        const urlPicId = searchParams.get('pic_id');
+        
+        if (urlPicId) {
+            fetchAssets('all', pageSize, urlPicId);
+        } else if (urlKanwil) {
             setSelectedKanwil(urlKanwil);
             fetchAssets(urlKanwil, pageSize);
         } else {
@@ -41,7 +46,7 @@ export default function AssetInventory() {
         }
     };
 
-    const fetchAssets = async (kanwilId = 'all', limit = pageSize) => {
+    const fetchAssets = async (kanwilId = 'all', limit = pageSize, picId = null) => {
         setLoading(true);
         let query = supabase.from('managed_assets').select(`
             *,
@@ -50,6 +55,7 @@ export default function AssetInventory() {
         `);
         
         if (kanwilId !== 'all') query = query.eq('kanwil_id', kanwilId);
+        if (picId) query = query.eq('pic_id', picId);
         
         if (limit !== 'all') {
             query = query.limit(limit);
@@ -186,6 +192,7 @@ export default function AssetInventory() {
                         value={selectedKanwil}
                         onChange={(e) => {
                             setSelectedKanwil(e.target.value);
+                            navigate('/assets'); // Clear technician filter
                             fetchAssets(e.target.value);
                         }}
                         className="bg-white border border-slate-200 rounded-xl px-6 py-3 text-xs font-black uppercase tracking-widest text-slate-700 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer hover:border-slate-300"
@@ -193,6 +200,14 @@ export default function AssetInventory() {
                         <option value="all">Seluruh Wilayah</option>
                         {kanwils.map(kw => <option key={kw.id} value={kw.id}>{kw.name}</option>)}
                     </select>
+                    {searchParams.get('pic_id') && (
+                        <button 
+                            onClick={() => navigate('/assets')}
+                            className="px-4 py-3 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold text-[10px] tracking-widest uppercase hover:bg-red-100 transition-all flex items-center gap-2"
+                        >
+                            <FiXCircle /> Clear Filter
+                        </button>
+                    )}
                     <select 
                         value={pageSize}
                         onChange={(e) => {
