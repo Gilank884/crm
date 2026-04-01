@@ -1,8 +1,8 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState, useRef } from 'react';
-import { FiCalendar, FiUpload, FiPlus, FiTool, FiCheckCircle, FiClock, FiFileText, FiMapPin, FiUser, FiInfo, FiActivity, FiAlertCircle } from 'react-icons/fi';
+import { FiCalendar, FiUpload, FiPlus, FiTool, FiCheckCircle, FiClock, FiFileText, FiMapPin, FiUser, FiInfo, FiActivity, FiAlertCircle, FiDownload, FiSearch } from 'react-icons/fi';
 import { supabase } from '../../supabaseClient';
-import { parseExcelFile } from '../../utils/excelHandler';
+import { parseExcelFile, exportToExcel } from '../../utils/excelHandler';
 
 export default function MaintenanceTracker() {
     const fileInputRef = useRef(null);
@@ -23,6 +23,11 @@ export default function MaintenanceTracker() {
         return saved ? (saved === 'all' ? 'all' : parseInt(saved)) : 20;
     });
 
+    // New Filters
+    const [filterKanwil, setFilterKanwil] = useState('all');
+    const [filterTechnician, setFilterTechnician] = useState('all');
+    const [kanwils, setKanwils] = useState([]);
+
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [assets, setAssets] = useState([]);
@@ -42,20 +47,28 @@ export default function MaintenanceTracker() {
 
     const fetchInitialData = async () => {
         const { data: assetData } = await supabase.from('managed_assets').select('id, name, tid').order('name', { ascending: true });
-        const { data: techData } = await supabase.from('technicians').select('id, name').order('name', { ascending: true });
+        const { data: techData } = await supabase.from('technicians').select('id, name, kanwil_id').order('name', { ascending: true });
+        const { data: kwData } = await supabase.from('kanwils').select('id, name').order('name', { ascending: true });
+        
         setAssets(assetData || []);
         setTechnicians(techData || []);
-        fetchTasks(startDate, endDate, pageSize);
+        setKanwils(kwData || []);
+        fetchTasks(startDate, endDate, pageSize, filterKanwil, filterTechnician);
     };
 
-    const fetchTasks = async (start = startDate, end = endDate, limit = pageSize) => {
+    const fetchTasks = async (start = startDate, end = endDate, limit = pageSize, kanwilId = filterKanwil, techId = filterTechnician) => {
         setLoading(true);
         let query = supabase
             .from('maintenance_tasks')
             .select(`
                 *,
-                managed_assets ( name, tid, location ),
-                technicians ( name )
+                managed_assets ( 
+                    name, 
+                    tid, 
+                    location,
+                    kanwils ( name, id )
+                ),
+                technicians ( name, id )
             `)
             .gte('scheduled_date', start)
             .lte('scheduled_date', end)
@@ -69,10 +82,21 @@ export default function MaintenanceTracker() {
             
         const { data, error } = await query;
         
-        if (error) console.error(error);
-        else setTasks(data || []);
+        if (error) {
+            console.error(error);
+        } else {
+            let filtered = data || [];
+            if (kanwilId !== 'all') {
+                filtered = filtered.filter(t => t.managed_assets?.kanwils?.id === kanwilId);
+            }
+            if (techId !== 'all') {
+                filtered = filtered.filter(t => t.technician_id === techId);
+            }
+            setTasks(filtered);
+        }
         setLoading(false);
     };
+
 
     const handleExcelUpload = async (e) => {
         const file = e.target.files[0];
@@ -282,92 +306,138 @@ export default function MaintenanceTracker() {
                     </div>
                 </div>
 
-                <div className="flex flex-wrap gap-4 items-center">
-                    <button onClick={() => fileInputRef.current.click()} disabled={loading} className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-[10px] tracking-widest uppercase hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm min-h-[46px]">
-                        <FiUpload className="text-lg" /> Standard Import
+                <div className="flex flex-wrap gap-3 items-center">
+                    <button 
+                        onClick={() => {
+                            const exportData = tasks.map(t => ({
+                                'TID': t.managed_assets?.tid,
+                                'Site Name': t.managed_assets?.name,
+                                'Type': t.type,
+                                'Kanwil': t.managed_assets?.kanwils?.name,
+                                'Technician': t.technicians?.name || 'Unassigned',
+                                'Scheduled Date': t.scheduled_date,
+                                'Completed Date': t.completed_date || 'Pending',
+                                'Status': t.status
+                            }));
+                            exportToExcel(exportData, `Maintenance_Log_${new Date().toISOString().slice(0,10)}.xlsx`);
+                        }}
+                        disabled={loading || tasks.length === 0}
+                        className="px-5 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-[10px] tracking-widest uppercase hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 shadow-sm h-[46px] disabled:opacity-50"
+                    >
+                        <FiDownload className="text-lg" /> Export
                     </button>
+
+                    <button onClick={() => fileInputRef.current.click()} disabled={loading} className="px-5 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-[10px] tracking-widest uppercase hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm h-[46px]">
+                        <FiUpload className="text-lg" /> Import
+                    </button>
+
+                    <div className="flex flex-col gap-1">
+                        <select 
+                            value={filterKanwil} 
+                            onChange={(e) => { setFilterKanwil(e.target.value); fetchTasks(startDate, endDate, pageSize, e.target.value, filterTechnician); }}
+                            className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-sm outline-none h-[46px] cursor-pointer min-w-[150px]"
+                        >
+                            <option value="all">SEMUA KANWIL</option>
+                            {kanwils.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                        <select 
+                            value={filterTechnician} 
+                            onChange={(e) => { setFilterTechnician(e.target.value); fetchTasks(startDate, endDate, pageSize, filterKanwil, e.target.value); }}
+                            className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-sm outline-none h-[46px] cursor-pointer min-w-[150px]"
+                        >
+                            <option value="all">SEMUA TEKNISI</option>
+                            {technicians
+                                .filter(t => filterKanwil === 'all' || t.kanwil_id === filterKanwil)
+                                .map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                    </div>
                     
                     <div className="flex bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-[46px]">
-                        <div className="flex items-center px-4 bg-slate-50 border-r border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest gap-2">
-                             <FiCalendar /> Dari
+                        <div className="flex items-center px-3 bg-slate-50 border-r border-slate-200 text-[9px] font-black text-slate-400 uppercase tracking-widest gap-1.5">
+                             <FiCalendar /> DARI
                         </div>
                         <input 
                             type="date" 
                             value={startDate} 
-                            onChange={(e) => { setStartDate(e.target.value); fetchTasks(e.target.value, endDate, pageSize); }} 
-                            className="px-4 text-[10px] font-black uppercase tracking-widest text-slate-700 outline-none w-36 cursor-pointer" 
+                            onChange={(e) => { setStartDate(e.target.value); fetchTasks(e.target.value, endDate, pageSize, filterKanwil, filterTechnician); }} 
+                            className="px-3 text-[10px] font-black uppercase tracking-widest text-slate-700 outline-none w-32 cursor-pointer" 
                         />
-                        <div className="flex items-center px-4 bg-slate-50 border-x border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest gap-2">
-                             Sampai
+                        <div className="flex items-center px-3 bg-slate-50 border-x border-slate-200 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                             SAMPAI
                         </div>
                         <input 
                             type="date" 
                             value={endDate} 
-                            onChange={(e) => { setEndDate(e.target.value); fetchTasks(startDate, e.target.value, pageSize); }} 
-                            className="px-4 text-[10px] font-black uppercase tracking-widest text-slate-700 outline-none w-36 cursor-pointer" 
+                            onChange={(e) => { setEndDate(e.target.value); fetchTasks(startDate, e.target.value, pageSize, filterKanwil, filterTechnician); }} 
+                            className="px-3 text-[10px] font-black uppercase tracking-widest text-slate-700 outline-none w-32 cursor-pointer" 
                         />
                     </div>
                     <button onClick={() => setIsModalOpen(true)} className="btn-dongker shadow-lg shadow-blue-200 flex items-center gap-2 h-[46px]">
-                        <FiPlus className="text-lg" /> Jadwalkan
+                        <FiPlus className="text-lg" /> Jadwal
                     </button>
                 </div>
             </div>
 
-            {/* Table Container */}
-            <div className="bg-white border border-slate-200 rounded-[2.5rem] shadow-xl shadow-slate-200/50 overflow-hidden">
+            {/* Table Container - Compact Version */}
+            <div className="bg-white border border-slate-200 rounded-[2rem] shadow-xl shadow-slate-200/50 overflow-hidden">
                 <table className="w-full text-left">
-                    <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] tracking-widest font-black border-b border-slate-100">
+                    <thead className="bg-slate-50 text-slate-500 uppercase text-[9px] tracking-widest font-black border-b border-slate-100">
                         <tr>
-                            <th className="px-8 py-5 text-center">Status</th>
-                            <th className="px-8 py-5">TID / Asset Name</th>
-                            <th className="px-8 py-5 text-center">Category</th>
-                            <th className="px-8 py-5 text-center">Jadwal PM/CM</th>
-                            <th className="px-8 py-5 text-center">Visit Date</th>
-                            <th className="px-8 py-5">Teknisi</th>
-                            <th className="px-8 py-5 text-right">Actions</th>
+                            <th className="px-6 py-4 text-center">Status</th>
+                            <th className="px-6 py-4">TID / Site Name</th>
+                            <th className="px-6 py-4 text-center">Category</th>
+                            <th className="px-6 py-4 text-center">Kanwil</th>
+                            <th className="px-6 py-4 text-center">Schedule</th>
+                            <th className="px-6 py-4 text-center">Visit</th>
+                            <th className="px-6 py-4">Teknisi</th>
+                            <th className="px-6 py-4 text-right">Action</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                         {loading ? (
-                            [1, 2, 3, 4, 5].map(i => <tr key={i} className="h-16 animate-pulse"><td colSpan="6" className="px-8"><div className="h-4 bg-slate-50 rounded-full w-full" /></td></tr>)
+                            [1, 2, 3, 4, 5, 6].map(i => <tr key={i} className="h-12 animate-pulse"><td colSpan="8" className="px-6"><div className="h-2.5 bg-slate-50 rounded-full w-full" /></td></tr>)
                         ) : tasks.length === 0 ? (
-                            <tr><td colSpan="6" className="py-24 text-center text-slate-400 font-medium italic uppercase tracking-widest text-xs">No tasks found for this period.</td></tr>
+                            <tr><td colSpan="8" className="py-20 text-center text-slate-400 font-medium italic uppercase tracking-widest text-[10px]">No tasks found for this selection.</td></tr>
                         ) : (
                             tasks.map((task) => (
                                 <tr key={task.id} className={`hover:bg-blue-50/20 transition-all ${task.status === 'completed' ? 'opacity-60 grayscale-[0.3]' : ''}`}>
-                                    <td className="px-8 py-4 text-center">
+                                    <td className="px-6 py-2.5 text-center">
                                         <button 
                                             onClick={() => setConfirmingStatus({ id: task.id, currentStatus: task.completed_date ? 'completed' : 'pending' })}
-                                            className={`w-10 h-10 rounded-2xl border-2 flex items-center justify-center transition-all mx-auto ${task.completed_date ? 'bg-green-600 border-green-600 text-white shadow-lg shadow-green-100' : 'bg-white border-slate-200 text-transparent hover:border-blue-400'}`}
+                                            className={`w-8 h-8 rounded-xl border flex items-center justify-center transition-all mx-auto ${task.completed_date ? 'bg-green-600 border-green-600 text-white shadow-lg shadow-green-100' : 'bg-white border-slate-200 text-transparent hover:border-blue-400'}`}
                                         >
-                                            <FiCheckCircle className="text-xl" />
+                                            <FiCheckCircle className="text-sm" />
                                         </button>
                                     </td>
-                                    <td className="px-8 py-4">
-                                        <div className="flex items-center gap-3">
-                                            <span className="font-mono font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-[10px] uppercase border border-blue-100">{task.managed_assets?.tid || '---'}</span>
-                                            <div className="font-black uppercase tracking-tight text-sm text-slate-900">{task.managed_assets?.name}</div>
+                                    <td className="px-6 py-2.5">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-mono font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded text-[9px] uppercase border border-blue-100">{task.managed_assets?.tid || '---'}</span>
+                                            <div className="font-black uppercase tracking-tight text-[11px] text-slate-900 truncate max-w-[120px]">{task.managed_assets?.name}</div>
                                         </div>
                                     </td>
-                                    <td className="px-8 py-4 text-center">
-                                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest uppercase border ${task.type === 'PM' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>{task.type}</span>
+                                    <td className="px-6 py-2.5 text-center">
+                                        <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black tracking-widest uppercase border ${task.type === 'PM' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-rose-50 text-rose-600 border-rose-100'}`}>{task.type}</span>
                                     </td>
-                                    <td className="px-8 py-4 text-center text-[11px] font-bold text-slate-500 uppercase tracking-tight">{task.scheduled_date || '---'}</td>
-                                    <td className="px-8 py-4 text-center">
+                                    <td className="px-6 py-2.5 text-center text-[9px] font-bold text-slate-400 uppercase tracking-widest">{task.managed_assets?.kanwils?.name || '---'}</td>
+                                    <td className="px-6 py-2.5 text-center text-[10px] font-bold text-slate-500 uppercase tracking-tight">{task.scheduled_date || '---'}</td>
+                                    <td className="px-6 py-2.5 text-center">
                                         {task.completed_date ? (
-                                            <span className="bg-green-50 text-green-600 px-2.5 py-1 rounded-lg text-[10px] font-black border border-green-100">{task.completed_date}</span>
+                                            <span className="bg-green-50 text-green-600 px-2 py-0.5 rounded-lg text-[9px] font-black border border-green-100">{task.completed_date}</span>
                                         ) : (
-                                            <span className="text-slate-300 text-[10px] italic font-medium uppercase tracking-widest">Pending</span>
+                                            <span className="text-slate-300 text-[9px] italic font-medium uppercase tracking-widest">Pending</span>
                                         )}
                                     </td>
-                                    <td className="px-8 py-4">
+                                    <td className="px-6 py-2.5">
                                         <div className="flex items-center gap-2">
-                                            <div className="w-8 h-8 bg-slate-50 rounded-full flex items-center justify-center text-xs border border-slate-100 text-slate-300"><FiUser /></div>
-                                            <span className="text-[11px] font-black text-slate-600 uppercase tracking-tight">{task.technicians?.name || 'Unassigned'}</span>
+                                            <div className="w-6 h-6 bg-slate-50 rounded-full flex items-center justify-center text-[10px] border border-slate-100 text-slate-300"><FiUser /></div>
+                                            <span className="text-[10px] font-black text-slate-600 uppercase tracking-tight italic">{task.technicians?.name || 'Unassigned'}</span>
                                         </div>
                                     </td>
-                                    <td className="px-8 py-4 text-right">
-                                        <button className="p-2.5 bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all border border-slate-100"><FiFileText className="text-lg" /></button>
+                                    <td className="px-6 py-2.5 text-right">
+                                        <button className="p-2 bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all border border-slate-100"><FiFileText className="text-sm" /></button>
                                     </td>
                                 </tr>
                             ))
@@ -375,6 +445,7 @@ export default function MaintenanceTracker() {
                     </tbody>
                 </table>
             </div>
+
 
             {/* Manual Modal Refinement logic remains consistent */}
             <AnimatePresence>

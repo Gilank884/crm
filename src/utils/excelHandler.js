@@ -39,3 +39,16 @@ export const validateExcelColumns = (data, requiredColumns) => {
     const firstRow = data[0];
     return requiredColumns.every(col => col in firstRow);
 };
+
+/**
+ * Exports data to an Excel file.
+ * @param {Array} data - The data to export.
+ * @param {string} filename - The name of the file to save.
+ */
+export const exportToExcel = (data, filename = 'export.xlsx') => {
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+    XLSX.writeFile(workbook, filename);
+};
+
