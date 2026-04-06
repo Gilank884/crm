@@ -261,22 +261,53 @@ export default function MaintenanceTracker() {
         setLoading(true);
         try {
             const data = await parseExcelFile(file);
-            // Fetch more details for comparison: ID and Current Completion Date
-            const { data: existingTasks } = await supabase.from('maintenance_tasks').select('id, asset_id, type, period, completed_date');
+            
+            // 1. Initial Mappings
+            const { data: existingTasks } = await supabase.from('maintenance_tasks').select('id, asset_id, type, period, scheduled_date, completed_date');
+            const { data: currentAssets } = await supabase.from('managed_assets').select('id, tid');
+            
+            const assetMap = {};
+            currentAssets?.forEach(a => assetMap[a.tid?.toString()?.toUpperCase()] = a.id);
             
             const existingMap = {};
             existingTasks?.forEach(t => {
-                const key = `${t.asset_id}_${t.type}_${t.period}`;
+                const key = `${t.asset_id}_${t.scheduled_date}`;
                 existingMap[key] = { id: t.id, completed_date: t.completed_date };
             });
             
             const techMap = {};
             technicians.forEach(t => techMap[t.name?.toUpperCase()] = t.id);
-            const assetMap = {};
-            assets.forEach(a => assetMap[a.tid?.toString()?.toUpperCase()] = a.id);
 
+            // 2. AUTO-PROVISION MISSING ASSETS
+            const missingTids = new Map();
+            data.forEach(item => {
+                const tid = item['TID']?.toString()?.toUpperCase();
+                if (tid && !assetMap[tid]) {
+                    missingTids.set(tid, item['LOKASI'] || item['SITE'] || 'Auto-Provisioned Site');
+                }
+            });
+
+            if (missingTids.size > 0) {
+                const newAssets = Array.from(missingTids.entries()).map(([tid, name]) => ({
+                    tid,
+                    name,
+                    kanwil_id: null // To be filled manually later
+                }));
+                
+                const { data: provisioned, error: pErr } = await supabase
+                    .from('managed_assets')
+                    .insert(newAssets)
+                    .select('id, tid');
+                
+                if (!pErr && provisioned) {
+                    provisioned.forEach(a => assetMap[a.tid?.toString()?.toUpperCase()] = a.id);
+                }
+            }
+
+            // 3. PROCESS MAINTENANCE RECORDS
             const newRecords = [];
             const updateRecords = [];
+            const invalidRecords = [];
             let skipCount = 0;
             const createdTechNames = new Set();
 
@@ -286,18 +317,26 @@ export default function MaintenanceTracker() {
                 const tid = item['TID']?.toString()?.toUpperCase();
                 const typeRaw = item['TYPE'] || item['STATUS TYPE'] || '';
                 const type = typeRaw.toString().toUpperCase().includes('CM') ? 'CM' : 'PM';
+                const siteName = item['LOKASI'] || item['SITE'] || 'Unknown Site';
                 
                 const rawJadwal = item['JADWAL'] || item['SCHEDULED DATE'] || item['PLAN'];
-                if (!rawJadwal) continue;
-
-                const scheduledDate = getIsoDate(rawJadwal);
-                if (!scheduledDate) continue;
+                const scheduledDate = rawJadwal ? getIsoDate(rawJadwal) : null;
 
                 const rawStatus = item['STATUS'] || item['KUNJUNGAN'] || item['TANGGAL KUNJUNGAN'] || item['VISIT DATE'] || item['DATE'] || item['TANGGAL'];
                 const visitDate = getIsoDate(rawStatus);
                 
                 const assetId = assetMap[tid];
-                if (!assetId) continue;
+
+                // ═══ VALIDATION (Now with Auto-Provisioning, assetId should exist) ═══
+                if (!tid || !assetId || !scheduledDate) {
+                    invalidRecords.push({
+                        tid_preview: tid || 'MISSING',
+                        site_preview: siteName,
+                        scheduled_date: scheduledDate || 'INVALID',
+                        reason: !tid ? 'TID EMPTY' : !assetId ? 'TID NOT FOUND' : 'DATE INVALID'
+                    });
+                    continue;
+                }
 
                 let techId = techMap[pelaksana] || null;
                 if (!techId && pelaksana && !createdTechNames.has(pelaksana)) {
@@ -326,27 +365,25 @@ export default function MaintenanceTracker() {
                     status: visitDate ? 'completed' : 'pending', 
                     notes: `Imported: ${pelaksana || 'Unknown'}`, 
                     tid_preview: tid, 
-                    site_preview: item['LOKASI'] || 'Unknown Site', 
-                    tech_preview: pelaksana || 'Unassigned' 
+                    site_preview: siteName, 
+                    tech_preview: pelaksana || 'Unassigned',
+                    is_new_asset: missingTids.has(tid)
                 };
 
-                const key = `${assetId}_${type}_${taskPeriod}`;
+                // User requested key: TID (AssetID) + Scheduled Date
+                const key = `${assetId}_${scheduledDate}`;
                 const existing = existingMap[key];
 
                 if (existing) {
-                    // Normalize dates for comparison (null vs undefined vs empty string)
                     const existingDate = existing.completed_date || null;
                     const newDate = visitDate || null;
                     
                     if (existingDate !== newDate) {
-                        // Data changed (especially visit date), mark for update
                         updateRecords.push({ ...taskData, id: existing.id });
                     } else {
-                        // Identical data, skip
                         skipCount++;
                     }
                 } else {
-                    // Brand new record
                     newRecords.push(taskData);
                 }
             }
@@ -354,7 +391,10 @@ export default function MaintenanceTracker() {
             setImportData({ 
                 newRecords, 
                 updateRecords, 
+                invalidRecords,
                 skipCount, 
+                provisionedCount: missingTids.size,
+                totalRows: data.length + 1, // +1 for Header
                 openCount: [...newRecords, ...updateRecords].filter(r => !r.completed_date).length, 
                 closedCount: [...newRecords, ...updateRecords].filter(r => r.completed_date).length 
             });
@@ -372,7 +412,7 @@ export default function MaintenanceTracker() {
         setIsSaving(true);
         
         // Prepare all records for upsert
-        const allRecords = [...importData.newRecords, ...importData.updateRecords].map(({ tid_preview, site_preview, tech_preview, ...rest }) => ({
+        const allRecords = [...importData.newRecords, ...importData.updateRecords].map(({ tid_preview, site_preview, tech_preview, is_new_asset, ...rest }) => ({
             ...rest,
             period: rest.period || new Date().toISOString().slice(0, 7)
         }));
@@ -608,8 +648,8 @@ export default function MaintenanceTracker() {
             ) : (
             /* Chart View — Premium Design */
             <div className="space-y-5">
-                {/* Stat Cards Row */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Stat Cards Row - High Density */}
+                <div className="grid grid-cols-4 gap-4">
                     {(() => {
                         const totalTasks = tasks.length;
                         const totalMeet = tasks.filter(t => getPerformanceStatus(t) === 'MEET').length;
@@ -617,181 +657,116 @@ export default function MaintenanceTracker() {
                         const totalPending = tasks.filter(t => getPerformanceStatus(t) === 'PENDING').length;
                         const overallSla = totalTasks > 0 ? Math.round((totalMeet / (totalMeet + totalMiss || 1)) * 100) : 0;
                         return [
-                            { label: 'Total Tasks', value: totalTasks, sub: 'Seluruh Periode', icon: <FiDatabase size={18} />, gradient: 'from-slate-600 to-slate-800', shadow: 'shadow-slate-200' },
-                            { label: 'In SLA (Meet)', value: totalMeet, sub: `${totalTasks > 0 ? Math.round((totalMeet/totalTasks)*100) : 0}% dari total`, icon: <FiCheckCircle size={18} />, gradient: 'from-blue-500 to-blue-700', shadow: 'shadow-blue-200' },
-                            { label: 'Out SLA (Miss)', value: totalMiss, sub: `${totalTasks > 0 ? Math.round((totalMiss/totalTasks)*100) : 0}% dari total`, icon: <FiAlertCircle size={18} />, gradient: 'from-rose-500 to-rose-700', shadow: 'shadow-rose-200' },
-                            { label: 'SLA Rate', value: `${overallSla}%`, sub: totalPending > 0 ? `${totalPending} masih pending` : 'Semua selesai', icon: <FiActivity size={18} />, gradient: overallSla >= 80 ? 'from-emerald-500 to-emerald-700' : overallSla >= 50 ? 'from-amber-500 to-amber-600' : 'from-rose-500 to-rose-700', shadow: overallSla >= 80 ? 'shadow-emerald-200' : 'shadow-amber-200' }
+                            { label: 'Total Tasks', value: totalTasks, sub: 'Log Count', icon: <FiDatabase size={16} />, gradient: 'from-slate-700 to-slate-900', shadow: 'shadow-slate-200' },
+                            { label: 'In SLA (Meet)', value: totalMeet, sub: `${totalTasks > 0 ? Math.round((totalMeet/totalTasks)*100) : 0}% Yield`, icon: <FiCheckCircle size={16} />, gradient: 'from-blue-600 to-blue-800', shadow: 'shadow-blue-200' },
+                            { label: 'Out SLA (Miss)', value: totalMiss, sub: `${totalTasks > 0 ? Math.round((totalMiss/totalTasks)*100) : 0}% Loss`, icon: <FiAlertCircle size={16} />, gradient: 'from-rose-600 to-rose-800', shadow: 'shadow-rose-200' },
+                            { label: 'Overall Rate', value: `${overallSla}%`, sub: 'Efficiency', icon: <FiActivity size={16} />, gradient: overallSla >= 85 ? 'from-emerald-600 to-emerald-800' : overallSla >= 60 ? 'from-amber-600 to-amber-700' : 'from-rose-600 to-rose-800', shadow: 'shadow-indigo-100' }
                         ].map(card => (
-                            <div key={card.label} className={`relative overflow-hidden bg-gradient-to-br ${card.gradient} rounded-2xl p-5 text-white shadow-xl ${card.shadow} group hover:scale-[1.02] transition-transform`}>
-                                <div className="absolute -right-3 -top-3 w-20 h-20 bg-white/5 rounded-full" />
-                                <div className="absolute -right-1 -bottom-4 w-14 h-14 bg-white/5 rounded-full" />
-                                <div className="flex items-center gap-2.5 mb-3 opacity-80">
+                            <div key={card.label} className={`relative overflow-hidden bg-gradient-to-br ${card.gradient} rounded-xl p-4 text-white shadow-lg ${card.shadow} group hover:translate-y-[-2px] transition-all`}>
+                                <div className="absolute -right-2 -top-2 w-16 h-16 bg-white/5 rounded-full" />
+                                <div className="flex items-center gap-2 mb-2 opacity-70">
                                     {card.icon}
-                                    <span className="text-[9px] font-black uppercase tracking-[0.15em]">{card.label}</span>
+                                    <span className="text-[8px] font-black uppercase tracking-[0.1em]">{card.label}</span>
                                 </div>
-                                <div className="text-3xl font-[950] tracking-tight leading-none">{card.value}</div>
-                                <div className="text-[9px] font-bold opacity-60 mt-1.5 uppercase tracking-wider">{card.sub}</div>
+                                <div className="flex items-baseline gap-2">
+                            <div className="text-2xl font-[950] tracking-tighter leading-none">{card.value}</div>
+                                    <div className="text-[7px] font-bold opacity-40 uppercase tracking-widest">{card.sub}</div>
+                                </div>
                             </div>
                         ));
                     })()}
                 </div>
 
-                {/* Main Chart Card */}
-                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                    {/* Chart Header */}
-                    <div className="flex items-center justify-between px-8 py-5 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
-                        <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md shadow-blue-200">
-                                <FiBarChart2 size={16} />
+                {/* SLA Dashboard Section - Grid Layout for No-Scroll */}
+                <div className="grid grid-cols-12 gap-5 h-[420px]">
+                    {/* Left: Performance Chart (8/12) */}
+                    <div className="col-span-8 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                            <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+                                    <FiBarChart2 size={16} />
+                                </div>
+                                <div>
+                                    <h2 className="text-sm font-[950] text-slate-900 uppercase tracking-tighter">SLA Health Overview</h2>
+                                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Success Yield Trends</p>
+                                </div>
                             </div>
-                            <div>
-                                <h2 className="text-sm font-[950] text-slate-900 uppercase tracking-tight">SLA Performance Overview</h2>
-                                <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Persentase Pencapaian per Bulan</p>
+                            <div className="flex items-center gap-4 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
+                                {[
+                                    { label: 'SUCCESS', color: 'bg-blue-500' },
+                                    { label: 'LOSS', color: 'bg-rose-500' },
+                                    { label: 'WORK', color: 'bg-lime-500' }
+                                ].map(l => (
+                                    <div key={l.label} className="flex items-center gap-1.5">
+                                        <div className={`w-2 h-2 rounded-sm ${l.color}`} />
+                                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-tight">{l.label}</span>
+                                    </div>
+                                ))}
                             </div>
                         </div>
-                        <div className="flex items-center gap-5 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
-                            {[
-                                { label: 'IN SLA', color: 'bg-blue-500' },
-                                { label: 'OUT SLA', color: 'bg-rose-500' },
-                                { label: 'IN PROGRESS', color: 'bg-lime-500' }
-                            ].map(l => (
-                                <div key={l.label} className="flex items-center gap-1.5">
-                                    <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
-                                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-wide">{l.label}</span>
+
+                        <div className="flex-1 p-6 relative">
+                            {chartData.length === 0 ? (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-20">
+                                    <FiActivity size={32} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Awaiting Data Pool</span>
+                                </div>
+                            ) : (
+                                <ResponsiveContainer width="100%" height={280}>
+                                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} barCategoryGap="25%">
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                                        <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 900, fill: '#475569' }} axisLine={false} tickLine={false} />
+                                        <YAxis tick={{ fontSize: 8, fontWeight: 700, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} width={30} />
+                                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', fontSize: '10px', fontWeight: 800 }} cursor={{ fill: '#f8fafc', radius: 8 }} />
+                                        <Bar dataKey="IN SLA" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                                        <Bar dataKey="OUT SLA" fill="#f43f5e" radius={[6, 6, 0, 0]} />
+                                        <Bar dataKey="IN PROGRESS" fill="#84cc16" radius={[6, 6, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Right: Vertical Summary Pool (4/12) */}
+                    <div className="col-span-4 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
+                        <div className="px-6 py-5 bg-slate-900 text-white flex items-center justify-between">
+                            <div>
+                                <h2 className="text-xs font-black uppercase tracking-widest">Yield Analysis</h2>
+                                <p className="text-[7px] font-bold text-white/40 uppercase tracking-[0.2em] mt-0.5">Monthly Node Performance</p>
+                            </div>
+                            <FiActivity className="text-blue-400" />
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50/50">
+                            {chartData.map(d => (
+                                <div key={d.name} className="bg-white border border-slate-200 p-3 rounded-lg flex items-center justify-between hover:border-blue-300 transition-all group">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 bg-slate-50 rounded-lg flex flex-col items-center justify-center border border-slate-100 group-hover:bg-blue-50 transition-colors">
+                                            <span className="text-[9px] font-black text-slate-800 tracking-tighter leading-none">{d.name.split(' ')[0]}</span>
+                                            <span className="text-[7px] font-bold text-slate-400 tracking-tighter">{d.name.split(' ')[1]}</span>
+                                        </div>
+                                        <div>
+                                            <div className="text-[12px] font-[950] text-slate-900 tabular-nums">{d['IN SLA']}% <span className="text-[8px] text-slate-300 font-bold ml-1 uppercase">SLA</span></div>
+                                            <div className="flex items-center gap-3 mt-0.5">
+                                                <div className="flex items-center gap-1">
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                                    <span className="text-[8px] font-black text-slate-400">{d.meetRaw}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                                    <span className="text-[8px] font-black text-slate-400">{d.missRaw}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-lime-500" />
+                                                    <span className="text-[8px] font-black text-slate-400">{d.pendingRaw}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className={`w-1.5 h-8 rounded-full ${parseInt(d['IN SLA']) >= 85 ? 'bg-emerald-500' : parseInt(d['IN SLA']) >= 60 ? 'bg-amber-500' : 'bg-rose-500'}`} />
                                 </div>
                             ))}
                         </div>
                     </div>
-
-                    {/* Chart Area */}
-                    <div className="px-6 pt-6 pb-2">
-                        {chartData.length === 0 ? (
-                            <div className="h-96 flex flex-col items-center justify-center gap-3">
-                                <FiBarChart2 size={40} className="text-slate-100" />
-                                <span className="text-slate-200 text-[10px] font-black uppercase tracking-[0.5em]">No Data Available</span>
-                            </div>
-                        ) : (
-                            <ResponsiveContainer width="100%" height={400}>
-                                <BarChart data={chartData} margin={{ top: 25, right: 20, left: 10, bottom: 15 }} barCategoryGap="20%">
-                                    <CartesianGrid strokeDasharray="4 4" stroke="#f1f5f9" vertical={false} />
-                                    <XAxis 
-                                        dataKey="name" 
-                                        tick={{ fontSize: 9, fontWeight: 900, fill: '#475569', letterSpacing: '0.05em' }} 
-                                        axisLine={{ stroke: '#e2e8f0', strokeWidth: 1 }} 
-                                        tickLine={false}
-                                        dy={8}
-                                    />
-                                    <YAxis 
-                                        tick={{ fontSize: 8, fontWeight: 700, fill: '#94a3b8' }} 
-                                        axisLine={false} 
-                                        tickLine={false} 
-                                        tickFormatter={(v) => `${v}%`}
-                                        domain={[0, 100]}
-                                        width={35}
-                                    />
-                                    <Tooltip 
-                                        contentStyle={{ 
-                                            borderRadius: '0.75rem', 
-                                            border: 'none', 
-                                            boxShadow: '0 20px 60px rgba(0,0,0,0.12)', 
-                                            fontSize: '11px', 
-                                            fontWeight: 800,
-                                            padding: '12px 16px',
-                                            background: 'rgba(255,255,255,0.97)',
-                                            backdropFilter: 'blur(8px)'
-                                        }}
-                                        formatter={(value, name) => [`${value}%`, name]}
-                                        cursor={{ fill: 'rgba(99, 102, 241, 0.04)', radius: 8 }}
-                                        labelStyle={{ fontWeight: 900, fontSize: '10px', color: '#1e293b', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.1em' }}
-                                    />
-                                    <Bar dataKey="IN SLA" fill="#3b82f6" radius={[8, 8, 0, 0]} maxBarSize={52}>
-                                        <LabelList dataKey="IN SLA" position="top" formatter={(v) => v > 0 ? `${v}%` : ''} style={{ fontSize: '10px', fontWeight: 900, fill: '#3b82f6' }} offset={8} />
-                                    </Bar>
-                                    <Bar dataKey="OUT SLA" fill="#f43f5e" radius={[8, 8, 0, 0]} maxBarSize={52}>
-                                        <LabelList dataKey="OUT SLA" position="top" formatter={(v) => v > 0 ? `${v}%` : ''} style={{ fontSize: '10px', fontWeight: 900, fill: '#f43f5e' }} offset={8} />
-                                    </Bar>
-                                    <Bar dataKey="IN PROGRESS" fill="#84cc16" radius={[8, 8, 0, 0]} maxBarSize={52}>
-                                        <LabelList dataKey="IN PROGRESS" position="top" formatter={(v) => v > 0 ? `${v}%` : ''} style={{ fontSize: '10px', fontWeight: 900, fill: '#65a30d' }} offset={8} />
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
-                        )}
-                    </div>
-
-                    {/* Premium Summary Table */}
-                    {chartData.length > 0 && (
-                        <div className="px-8 pb-6">
-                            <div className="bg-slate-50/80 rounded-xl border border-slate-100 overflow-hidden">
-                                <table className="w-full">
-                                    <thead>
-                                        <tr className="border-b border-slate-200/60">
-                                            <th className="py-3 px-5 text-left text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] w-36">Kategori</th>
-                                            {chartData.map(d => (
-                                                <th key={d.name} className="py-3 px-3 text-center text-[8px] font-black text-slate-400 uppercase tracking-[0.15em]">{d.name}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr className="border-b border-slate-100/60 hover:bg-blue-50/30 transition-colors">
-                                            <td className="py-3 px-5">
-                                                <div className="flex items-center gap-2.5">
-                                                    <div className="w-3 h-3 rounded bg-blue-500 shadow-sm shadow-blue-200" />
-                                                    <span className="text-[9px] font-black text-blue-700 uppercase tracking-wider">In SLA</span>
-                                                </div>
-                                            </td>
-                                            {chartData.map(d => (
-                                                <td key={d.name} className="py-3 px-3 text-center">
-                                                    <span className="text-[11px] font-[950] text-blue-600">{d['IN SLA']}%</span>
-                                                    <span className="block text-[7px] font-bold text-slate-300 mt-0.5">{d.meetRaw} task</span>
-                                                </td>
-                                            ))}
-                                        </tr>
-                                        <tr className="border-b border-slate-100/60 hover:bg-rose-50/30 transition-colors">
-                                            <td className="py-3 px-5">
-                                                <div className="flex items-center gap-2.5">
-                                                    <div className="w-3 h-3 rounded bg-rose-500 shadow-sm shadow-rose-200" />
-                                                    <span className="text-[9px] font-black text-rose-700 uppercase tracking-wider">Out SLA</span>
-                                                </div>
-                                            </td>
-                                            {chartData.map(d => (
-                                                <td key={d.name} className="py-3 px-3 text-center">
-                                                    <span className="text-[11px] font-[950] text-rose-600">{d['OUT SLA']}%</span>
-                                                    <span className="block text-[7px] font-bold text-slate-300 mt-0.5">{d.missRaw} task</span>
-                                                </td>
-                                            ))}
-                                        </tr>
-                                        <tr className="hover:bg-lime-50/30 transition-colors">
-                                            <td className="py-3 px-5">
-                                                <div className="flex items-center gap-2.5">
-                                                    <div className="w-3 h-3 rounded bg-lime-500 shadow-sm shadow-lime-200" />
-                                                    <span className="text-[9px] font-black text-lime-700 uppercase tracking-wider">In Progress</span>
-                                                </div>
-                                            </td>
-                                            {chartData.map(d => (
-                                                <td key={d.name} className="py-3 px-3 text-center">
-                                                    <span className="text-[11px] font-[950] text-lime-600">{d['IN PROGRESS']}%</span>
-                                                    <span className="block text-[7px] font-bold text-slate-300 mt-0.5">{d.pendingRaw} task</span>
-                                                </td>
-                                            ))}
-                                        </tr>
-                                    </tbody>
-                                    <tfoot>
-                                        <tr className="border-t border-slate-200/80 bg-white/60">
-                                            <td className="py-3 px-5">
-                                                <span className="text-[9px] font-black text-slate-600 uppercase tracking-wider">Total</span>
-                                            </td>
-                                            {chartData.map(d => (
-                                                <td key={d.name} className="py-3 px-3 text-center">
-                                                    <span className="text-[11px] font-[950] text-slate-800">{d.totalRaw}</span>
-                                                    <span className="block text-[7px] font-bold text-slate-300 mt-0.5">tasks</span>
-                                                </td>
-                                            ))}
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
-                        </div>
-                    )}
                 </div>
             </div>
             )}
@@ -800,7 +775,7 @@ export default function MaintenanceTracker() {
             <AnimatePresence>
                 {isModalOpen && (
                     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white p-10 rounded-[3rem] w-full max-w-lg relative shadow-2xl border border-slate-200">
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white p-10 rounded-none w-full max-w-lg relative shadow-2xl border border-slate-200">
                             <button onClick={() => setIsModalOpen(false)} className="absolute top-8 right-8 w-10 h-10 bg-slate-50 hover:bg-rose-50 text-slate-300 hover:text-rose-500 rounded-full flex items-center justify-center transition-all">✕</button>
                             <h2 className="text-2xl font-[950] text-slate-900 mb-2 uppercase tracking-tighter">Inject Production Schedule</h2>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-10 border-b border-slate-50 pb-4">Internal Asset Log Sync</p>
@@ -844,7 +819,7 @@ export default function MaintenanceTracker() {
             <AnimatePresence>
                 {isPreviewModalOpen && (
                     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6">
-                        <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-white">
+                        <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="bg-white rounded-none shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-white">
                             <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                                 <div>
                                     <div className="flex items-center gap-3 mb-1">
@@ -857,16 +832,17 @@ export default function MaintenanceTracker() {
                             </div>
 
                             <div className="flex-1 overflow-y-auto p-8 space-y-8">
-                                <div className="grid grid-cols-4 gap-4">
+                                <div className="grid grid-cols-5 gap-4">
                                     {[
-                                        { label: 'Scanned', val: importData.newRecords.length + importData.updateRecords.length + importData.skipCount, c: 'blue' },
-                                        { label: 'New Records', val: importData.newRecords.length, c: 'emerald' },
-                                        { label: 'To Update', val: importData.updateRecords.length, c: 'amber' },
-                                        { label: 'Skipped', val: importData.skipCount, c: 'slate' }
+                                        { label: 'File Rows', val: importData.totalRows || 0, c: 'slate' },
+                                        { label: 'New Tasks', val: importData.newRecords.length, c: 'emerald' },
+                                        { label: 'Updates', val: importData.updateRecords.length, c: 'amber' },
+                                        { label: 'New Assets', val: importData.provisionedCount || 0, c: 'indigo' },
+                                        { label: 'Invalid', val: importData.invalidRecords?.length || 0, c: 'rose' }
                                     ].map(s => (
-                                        <div key={s.label} className={`p-6 bg-${s.c}-50/30 border border-${s.c}-100 rounded-xl relative overflow-hidden group`}>
+                                        <div key={s.label} className={`p-5 bg-${s.c}-50/30 border border-${s.c}-100 rounded-xl relative overflow-hidden group`}>
                                             <div className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-1">{s.label}</div>
-                                            <div className={`text-3xl font-[950] text-${s.c}-600 tracking-tighter`}>{s.val}</div>
+                                            <div className={`text-2xl font-[950] text-${s.c}-600 tracking-tighter`}>{s.val}</div>
                                         </div>
                                     ))}
                                 </div>
@@ -884,12 +860,26 @@ export default function MaintenanceTracker() {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-100/50 bg-white/40">
+                                                {importData.invalidRecords?.map((r, i) => (
+                                                    <tr key={`inv-${i}`} className="bg-rose-50/30 group">
+                                                        <td className="px-10 py-4 text-rose-600 font-mono italic">{r.tid_preview}</td>
+                                                        <td className="px-10 py-4 text-slate-400 truncate max-w-[200px]">{r.site_preview}</td>
+                                                        <td className="px-10 py-4 text-center text-rose-300 line-through">{r.scheduled_date}</td>
+                                                        <td className="px-10 py-4 text-center">
+                                                            <span className="px-2 py-1 bg-rose-600 text-white rounded text-[8px] font-black shadow-sm group-hover:animate-bounce">ERR: {r.reason}</span>
+                                                        </td>
+                                                        <td className="px-10 py-4 text-right opacity-40 italic">SKIPPED</td>
+                                                    </tr>
+                                                ))}
                                                 {importData.newRecords.map((r, i) => (
                                                     <tr key={`new-${i}`} className="hover:bg-emerald-50/20">
-                                                        <td className="px-10 py-4 text-emerald-600 font-mono">{r.tid_preview}</td>
+                                                        <td className="px-10 py-4 text-emerald-600 font-mono flex items-center gap-2">
+                                                            {r.tid_preview}
+                                                            {r.is_new_asset && <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded-[4px] text-[7px] font-black animate-pulse">NEW ASSET</span>}
+                                                        </td>
                                                         <td className="px-10 py-4 text-slate-600 truncate max-w-[200px]">{r.site_preview}</td>
                                                         <td className="px-10 py-4 text-center text-slate-400">{r.scheduled_date}</td>
-                                                        <td className="px-10 py-4 text-center"><span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[9px] font-black">NEW</span></td>
+                                                        <td className="px-10 py-4 text-center"><span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[9px] font-black">NEW TASK</span></td>
                                                         <td className="px-10 py-4 text-right opacity-40 italic">{r.tech_preview}</td>
                                                     </tr>
                                                 ))}

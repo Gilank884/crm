@@ -24,6 +24,25 @@ export default function TechnicianManager() {
     const [selectedSpecialty, setSelectedSpecialty] = useState('all');
     const [newTech, setNewTech] = useState({ name: '', kanwil_id: '', phone: '', specialty: 'Generalist' });
 
+    // Performance Yield State
+    const [activeTab, setActiveTab] = useState('list'); // 'list' | 'performance'
+    const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+    const [performanceData, setPerformanceData] = useState([]);
+
+    const getPerformanceStatus = (task) => {
+        if (!task.scheduled_date) return 'PENDING';
+        const scheduled = new Date(task.scheduled_date);
+        const completed = task.completed_date ? new Date(task.completed_date) : null;
+        const now = new Date();
+        const taskMonthYear = scheduled.getFullYear() * 12 + scheduled.getMonth();
+        const currentMonthYear = now.getFullYear() * 12 + now.getMonth();
+        if (!completed) return (taskMonthYear < currentMonthYear) ? 'MISS' : 'PENDING';
+        const diffInDays = Math.floor(Math.abs(completed - scheduled) / (1000 * 60 * 60 * 24));
+        const completedMonthYear = completed.getFullYear() * 12 + completed.getMonth();
+        if (completedMonthYear > taskMonthYear) return 'MISS';
+        return diffInDays <= 7 ? 'MEET' : 'MISS';
+    };
+
     // Import Preview State
     const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
     const [importData, setImportData] = useState({ newRecords: [], duplicateRecords: [] });
@@ -36,14 +55,71 @@ export default function TechnicianManager() {
         const { data: kwData } = await supabase.from('kanwils').select('*').order('name', { ascending: true });
         setKanwils(kwData || []);
         
-        const urlKanwil = searchParams.get('kanwil');
-        if (urlKanwil) {
-            setSelectedKanwil(urlKanwil);
-            fetchTechnicians(urlKanwil, pageSize);
+        if (activeTab === 'performance') {
+            fetchPerformanceStats(selectedMonth);
         } else {
-            fetchTechnicians(selectedKanwil, pageSize);
+            const urlKanwil = searchParams.get('kanwil');
+            if (urlKanwil) {
+                setSelectedKanwil(urlKanwil);
+                fetchTechnicians(urlKanwil, pageSize);
+            } else {
+                fetchTechnicians(selectedKanwil, pageSize);
+            }
         }
     };
+
+    const fetchPerformanceStats = async (period) => {
+        setLoading(true);
+        try {
+            const { data: tasks, error: tErr } = await supabase
+                .from('maintenance_tasks')
+                .select('technician_id, type, scheduled_date, completed_date')
+                .eq('period', period);
+            
+            if (tErr) throw tErr;
+
+            const { data: techs, error: techErr } = await supabase
+                .from('technicians')
+                .select('id, name, kanwil_id, kanwils(name)');
+            
+            if (techErr) throw techErr;
+
+            const stats = techs.map(tech => {
+                const techTasks = tasks?.filter(t => t.technician_id === tech.id) || [];
+                const pmTasks = techTasks.filter(t => t.type === 'PM');
+                const cmTasks = techTasks.filter(t => t.type === 'CM');
+
+                const pmMeet = pmTasks.filter(t => getPerformanceStatus(t) === 'MEET').length;
+                const pmMiss = pmTasks.filter(t => getPerformanceStatus(t) === 'MISS').length;
+                const cmMeet = cmTasks.filter(t => getPerformanceStatus(t) === 'MEET').length;
+                const cmMiss = cmTasks.filter(t => getPerformanceStatus(t) === 'MISS').length;
+
+                const totalIn = pmMeet + cmMeet;
+                const totalOut = pmMiss + cmMiss;
+                const totalTasks = pmTasks.length + cmTasks.length;
+                const outPercent = totalTasks > 0 ? Math.round((totalOut / totalTasks) * 100) : 0;
+
+                return {
+                    id: tech.id,
+                    name: tech.name,
+                    kanwil: tech.kanwils?.name || 'Unknown',
+                    pmMeet, pmMiss, cmMeet, cmMiss,
+                    totalIn, totalOut, outPercent
+                };
+            }).filter(s => (s.pmMeet + s.pmMiss + s.cmMeet + s.cmMiss) > 0);
+
+            setPerformanceData(stats.sort((a, b) => b.outPercent - a.outPercent));
+        } catch (err) {
+            console.error(err);
+        }
+        setLoading(false);
+    };
+
+    useEffect(() => {
+        if (activeTab === 'performance') {
+            fetchPerformanceStats(selectedMonth);
+        }
+    }, [selectedMonth, activeTab]);
 
     const fetchTechnicians = async (kanwilId = selectedKanwil, limit = pageSize) => {
         setLoading(true);
@@ -97,8 +173,6 @@ export default function TechnicianManager() {
         setLoading(true);
         try {
             const data = await parseExcelFile(file);
-            
-            // Fetch ALL existing technicians to check for duplicates (Name + Kanwil)
             const { data: existingTechs } = await supabase.from('technicians').select('name, kanwil_id');
             const existingKeys = new Set(existingTechs?.map(t => `${t.name?.toUpperCase().trim()}_${t.kanwil_id}`) || []);
 
@@ -123,19 +197,16 @@ export default function TechnicianManager() {
                 };
 
                 const key = `${name.toUpperCase()}_${matchedKanwil.id}`;
-                
-                // Check against DB and also against records already found in this file
                 if (existingKeys.has(key)) {
                     duplicateRecords.push(techData);
                 } else {
                     newRecords.push(techData);
-                    existingKeys.add(key); // Prevent duplicate within the same file
+                    existingKeys.add(key);
                 }
             }
 
             setImportData({ newRecords, duplicateRecords });
             setIsPreviewModalOpen(true);
-            
         } catch (err) {
             console.error(err);
             alert('Gagal memproses file Excel.');
@@ -151,9 +222,7 @@ export default function TechnicianManager() {
         }
 
         setIsSaving(true);
-        // Remove preview-only fields
         const uploadData = importData.newRecords.map(({ kanwil_name, ...rest }) => rest);
-        
         const { error } = await supabase.from('technicians').insert(uploadData);
         
         if (error) {
@@ -168,8 +237,6 @@ export default function TechnicianManager() {
 
     const handleAddTech = async (e) => {
         e.preventDefault();
-        
-        // Anti-Duplicate Check
         const isDuplicate = technicians.some(t => 
             t.name?.toLowerCase().trim() === newTech.name?.toLowerCase().trim() && 
             t.kanwil_id === newTech.kanwil_id
@@ -197,256 +264,330 @@ export default function TechnicianManager() {
             
             {/* ═══ Header ═══ */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm mb-4 overflow-hidden">
-                {/* Top Row: Title + Stats + Actions */}
                 <div className="flex flex-col lg:flex-row items-center justify-between gap-4 px-6 py-5">
-                    {/* Brand */}
-                    <div className="flex items-center gap-4">
-                        <div className="w-11 h-11 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-                            <FiUsers size={20} />
+                    {/* Brand & Tabs */}
+                    <div className="flex items-center gap-8">
+                        <div className="flex items-center gap-4">
+                            <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
+                                <FiUsers size={20} />
+                            </div>
+                            <div>
+                                <h1 className="text-lg font-[950] text-slate-900 leading-none tracking-tight">Personnel Hub</h1>
+                                <p className="text-[9px] font-bold text-slate-400 tracking-[0.15em] mt-1.5 uppercase">Technician Management</p>
+                            </div>
                         </div>
-                        <div>
-                            <h1 className="text-lg font-[950] text-slate-900 leading-none tracking-tight">Personnel Hub</h1>
-                            <p className="text-[9px] font-bold text-slate-400 tracking-[0.15em] mt-1 uppercase">Field Force Directory</p>
+
+                        {/* Custom Tab Switcher */}
+                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 items-center">
+                            <button 
+                                onClick={() => setActiveTab('list')}
+                                className={`px-4 py-2 rounded-lg text-[10px] font-black transition-all flex items-center gap-2 ${activeTab === 'list' ? 'bg-white text-indigo-600 shadow-sm border border-indigo-100' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                                <FiList size={14} /> LIST
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('performance')}
+                                className={`px-4 py-2 rounded-lg text-[10px] font-black transition-all flex items-center gap-2 ${activeTab === 'performance' ? 'bg-white text-indigo-600 shadow-sm border border-indigo-100' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                                <FiTrendingUp size={14} /> YIELD ANALYSIS
+                            </button>
                         </div>
                     </div>
 
-                    {/* Stats Chips */}
+                    {/* Right Side Actions */}
                     <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-3 border-l-[3px] border-blue-400 bg-blue-50/60 pl-3 pr-4 py-2 rounded-r-lg">
-                            <div>
-                                <div className="text-[8px] font-bold text-blue-600/60 uppercase tracking-wider">Total Force</div>
-                                <div className="text-xl font-[950] text-blue-600 leading-none tabular-nums mt-0.5">{technicians.length}</div>
+                        {activeTab === 'list' ? (
+                            <>
+                                <button onClick={() => fileInputRef.current.click()} className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200 rounded-xl text-[10px] font-black tracking-widest transition-all">
+                                    <FiUpload size={14} /> IMPORT
+                                </button>
+                                <button onClick={() => { setNewTech({ name: '', kanwil_id: '', phone: '', specialty: 'Generalist' }); setIsModalOpen(true); }} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-[10px] font-black tracking-widest shadow-lg shadow-indigo-200 transition-all">
+                                    <FiPlus size={14} /> ADD PERSONNEL
+                                </button>
+                            </>
+                        ) : (
+                            <div className="flex items-center gap-4 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Audit Period</span>
+                                <input 
+                                    type="month" 
+                                    value={selectedMonth}
+                                    onChange={(e) => setSelectedMonth(e.target.value)}
+                                    className="bg-transparent border-none outline-none text-[12px] font-black text-indigo-600 uppercase tabular-nums cursor-pointer px-1"
+                                />
                             </div>
-                        </div>
-                        <div className="flex items-center gap-3 border-l-[3px] border-emerald-400 bg-emerald-50/60 pl-3 pr-4 py-2 rounded-r-lg">
-                            <div>
-                                <div className="text-[8px] font-bold text-emerald-600/60 uppercase tracking-wider">Active Status</div>
-                                <div className="text-xl font-[950] text-emerald-600 leading-none tabular-nums mt-0.5">{technicians.filter(t => t.status === 'active').length}</div>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3 border-l-[3px] border-indigo-400 bg-indigo-50/60 pl-3 pr-4 py-2 rounded-r-lg">
-                            <div>
-                                <div className="text-[8px] font-bold text-indigo-600/60 uppercase tracking-wider">Assignments</div>
-                                <div className="text-xl font-[950] text-indigo-600 leading-none tabular-nums mt-0.5">
-                                    {technicians.reduce((acc, current) => acc + (current.managed_assets?.[0]?.count || 0), 0)}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Quick Access */}
-                    <div className="flex items-center gap-2">
-                        <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-50 transition-all">
-                            <FiSearch size={13} className="text-slate-300" />
-                            <input type="text" placeholder="Search Personnel..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-transparent border-none outline-none text-[10px] font-bold text-slate-700 w-48 ml-2 placeholder:text-slate-300" />
-                        </div>
-                        <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-black text-[9px] tracking-wider uppercase transition-all shadow-sm active:scale-95">
-                            <FiPlus size={13} /> Personnel
-                        </button>
-                        <button onClick={() => fileInputRef.current.click()} className="p-2 bg-slate-50 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-lg border border-slate-200 hover:border-blue-200 transition-all" title="Import Data">
-                            <FiUpload size={14} />
-                        </button>
+                        )}
                     </div>
                 </div>
 
-                {/* Bottom Row: Filters Bar */}
-                <div className="flex flex-wrap items-center gap-5 px-6 py-2.5 bg-slate-50/50 border-t border-slate-100">
-                    <div className="flex items-center gap-2">
-                        <FiBriefcase size={12} className="text-slate-300" />
-                        <select value={selectedSpecialty} onChange={(e) => setSelectedSpecialty(e.target.value)} className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-[9px] font-bold text-slate-600 outline-none cursor-pointer hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all">
-                            <option value="all">Specialization: All</option>
-                            {specialties.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
+                {/* Search & Global Filter Row (Only for List) */}
+                {activeTab === 'list' && (
+                    <div className="flex flex-col lg:flex-row gap-4 px-6 py-4 bg-slate-50/50 border-t border-slate-100 items-center">
+                        <div className="relative flex-1 group">
+                            <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-500 transition-colors" size={16} />
+                            <input 
+                                type="text" 
+                                placeholder="SEARCH PERSONNEL, PHONE, OR SPECIALTY..." 
+                                value={searchTerm} 
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full bg-white pl-12 pr-6 py-3 rounded-xl border border-slate-200 text-[10px] font-bold tracking-wider outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all placeholder:text-slate-300" 
+                            />
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <FiMapPin size={16} className="text-slate-400" />
+                            <select value={selectedKanwil} onChange={(e) => setSelectedKanwil(e.target.value)} className="bg-white px-4 py-3 rounded-xl border border-slate-200 text-[10px] font-black text-slate-600 outline-none focus:border-indigo-500 min-w-[160px]">
+                                <option value="all">ALL REGIONS</option>
+                                {kanwils.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
+                            </select>
+                            <div className="w-px h-6 bg-slate-200 mx-1" />
+                            <FiBriefcase size={16} className="text-slate-400" />
+                            <select value={selectedSpecialty} onChange={(e) => setSelectedSpecialty(e.target.value)} className="bg-white px-4 py-3 rounded-xl border border-slate-200 text-[10px] font-black text-slate-600 outline-none focus:border-indigo-500">
+                                <option value="all">ALL SPECIALTIES</option>
+                                {specialties.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                        </div>
                     </div>
-                    <div className="w-px h-4 bg-slate-200" />
-                    <div className="flex items-center gap-2">
-                        <FiMapPin size={12} className="text-slate-300" />
-                        <select value={selectedKanwil} onChange={(e) => { setSelectedKanwil(e.target.value); fetchTechnicians(e.target.value); }} className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-[9px] font-bold text-slate-600 outline-none cursor-pointer hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all">
-                            <option value="all">Seluruh Wilayah</option>
-                            {kanwils.map(kw => <option key={kw.id} value={kw.id}>{kw.name}</option>)}
-                        </select>
-                    </div>
-                    <div className="w-px h-4 bg-slate-200" />
-                    <div className="flex items-center gap-2">
-                        <FiList size={12} className="text-slate-300" />
-                        <select value={pageSize} onChange={(e) => { 
-                            const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value);
-                            setPageSize(val);
-                            localStorage.setItem('pageSize', val);
-                            fetchTechnicians(selectedKanwil, val);
-                        }} className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-[9px] font-bold text-slate-600 outline-none cursor-pointer hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all">
-                            <option value={50}>Limit 50 Rows</option>
-                            <option value={100}>Limit 100 Rows</option>
-                            <option value="all">Unlimited View</option>
-                        </select>
-                    </div>
-                    <div className="ml-auto flex items-center gap-2">
-                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest italic">Live Personnel Tracking</span>
-                        <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shadow-sm shadow-blue-200" />
-                    </div>
-                </div>
+                )}
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse table-fixed">
-                        <thead className="bg-slate-100/50 text-slate-400 border-b border-slate-200">
-                            <tr className="text-[9px] font-black tracking-widest uppercase align-middle">
-                                <th className="px-3 py-3 border-r border-slate-200 text-center w-12 bg-slate-200/20">#</th>
-                                <th className="px-5 py-3 border-r border-slate-200 w-64">PERSONNEL FULL NAME</th>
-                                <th className="px-3 py-3 border-r border-slate-200 text-center w-24">WILAYAH</th>
-                                <th className="px-3 py-3 border-r border-slate-200 text-center w-36">SPECIALTY</th>
-                                <th className="px-3 py-3 border-r border-slate-200 text-center w-28">MANAGED</th>
-                                <th className="px-3 py-3 border-r border-slate-200 text-center w-32">PHONE / CONTACT</th>
-                                <th className="px-3 py-3 border-r border-slate-200 text-center w-28">STATUS</th>
-                                <th className="px-3 py-3 text-center w-24 font-black">ACTION</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-200">
-                            {loading ? (
-                                Array(5).fill(0).map((_, i) => <tr key={i} className="h-10 animate-pulse"><td colSpan="8" className="px-3"><div className="h-2 bg-slate-50 rounded w-full opacity-60" /></td></tr>)
-                            ) : filteredTechnicians.length === 0 ? (
-                                <tr><td colSpan="8" className="py-24 text-center text-[10px] font-black text-slate-200 uppercase tracking-[0.5em] italic">No Personnel Records</td></tr>
-                            ) : (
-                                filteredTechnicians.map((tech, idx) => (
-                                    <tr key={tech.id} className="text-[10px] uppercase font-bold hover:bg-slate-50 transition-colors group">
-                                        <td className="px-3 py-4 border-r border-slate-100 text-center bg-slate-100/10 text-slate-300 font-mono text-[9px]">{idx + 1}</td>
-                                        <td className="px-5 py-4 border-r border-slate-100">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600 text-sm border border-blue-100 transition-transform group-hover:scale-105 shadow-sm">
-                                                    <FiUsers size={14} />
+            {/* ═══ Main Content View ═══ */}
+            {activeTab === 'list' ? (
+                /* Personnel List View */
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[500px]">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-[11px] uppercase tracking-tight">
+                            <thead className="bg-slate-50/80 border-b border-slate-100 text-slate-400 font-black">
+                                <tr>
+                                    <th className="px-8 py-5">Personnel Identification</th>
+                                    <th className="px-8 py-5 text-center">Managed Assets</th>
+                                    <th className="px-8 py-5 text-center">Status</th>
+                                    <th className="px-8 py-5 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 bg-white">
+                                {loading ? (
+                                    Array(5).fill(0).map((_, i) => <tr key={i} className="h-16 animate-pulse"><td colSpan="4" className="px-8"><div className="h-2 bg-slate-100 rounded w-full opacity-60" /></td></tr>)
+                                ) : filteredTechnicians.length === 0 ? (
+                                    <tr><td colSpan="4" className="py-24 text-center text-[10px] font-black text-slate-200 uppercase tracking-[0.5em] italic">No Personnel Records</td></tr>
+                                ) : (
+                                    filteredTechnicians.map((tech) => (
+                                        <tr key={tech.id} className="hover:bg-slate-50 transition-colors group">
+                                            <td className="px-8 py-5">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 text-lg border border-slate-200 transition-transform group-hover:scale-105 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-all">
+                                                        <FiUsers size={16} />
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-[11px] font-[950] text-slate-900 tracking-tight">{tech.name}</div>
+                                                        <div className="flex items-center gap-2 mt-1">
+                                                            <span className="text-[8px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{tech.kanwils?.name || 'GENERIC'}</span>
+                                                            <span className="text-[8px] font-bold text-slate-300 italic">{tech.specialty}</span>
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                                <div className="text-slate-800 tracking-tight">{tech.name}</div>
-                                            </div>
-                                        </td>
-                                        <td className="px-3 py-4 border-r border-slate-100 text-center">
-                                            <span className="font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100 text-[8px] font-black">{tech.kanwils?.code || '---'}</span>
-                                        </td>
-                                        <td className="px-3 py-4 border-r border-slate-100 text-center">
-                                            <div className="flex items-center justify-center gap-1.5 text-[9px] font-black text-slate-400 italic">
-                                                <FiBriefcase size={10} className="text-blue-500" />
-                                                {tech.specialty || 'Generalist'}
-                                            </div>
-                                        </td>
-                                        <td className="px-3 py-4 border-r border-slate-100 text-center">
-                                            <button onClick={() => navigate(`/assets?pic_id=${tech.id}`)} className="flex items-center justify-center gap-1.5 mx-auto bg-blue-50 px-3 py-1 rounded-full border border-blue-100 text-blue-600 hover:bg-blue-600 hover:text-white transition-all text-[8px] font-black shadow-sm group/btn">
-                                                <FiBox size={10} /> {tech.managed_assets?.[0]?.count || 0} Assets
-                                            </button>
-                                        </td>
-                                        <td className="px-3 py-4 border-r border-slate-100 text-center text-slate-400 font-mono text-[9px]">
-                                            {tech.phone || 'NO CONTACT'}
-                                        </td>
-                                        <td className="px-3 py-4 border-r border-slate-100 text-center">
-                                            <div className={`mx-auto flex items-center justify-center gap-1.5 px-3 py-1 rounded-full border w-fit text-[8px] font-black tracking-widest ${tech.status === 'active' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-300 border-slate-200'}`}>
-                                                <FiShield size={10} /> {tech.status}
-                                            </div>
-                                        </td>
-                                        <td className="px-3 py-4 text-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <div className="flex justify-center gap-2">
-                                                <button className="p-1.5 bg-slate-50 hover:bg- blue-50 rounded-md transition-all border border-slate-100 text-slate-400 hover:text-blue-600"><FiEdit3 size={12} /></button>
-                                                <button className="p-1.5 bg-slate-50 hover:bg-rose-50 rounded-md transition-all border border-slate-100 text-slate-400 hover:text-rose-500"><FiTrash2 size={12} /></button>
+                                            </td>
+                                            <td className="px-8 py-5 text-center">
+                                                <button onClick={() => navigate(`/assets?pic_id=${tech.id}`)} className="flex items-center justify-center gap-1.5 mx-auto bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all text-[9px] font-black shadow-sm group/btn">
+                                                    <FiBox size={12} /> {tech.managed_assets?.[0]?.count || 0} Assets
+                                                </button>
+                                            </td>
+                                            <td className="px-8 py-5 text-center">
+                                                <div className={`mx-auto flex items-center justify-center gap-2 px-3 py-1.5 rounded-full border w-fit text-[8px] font-black tracking-widest ${tech.status === 'active' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-300 border-slate-200'}`}>
+                                                    <FiShield size={10} /> {tech.status.toUpperCase()}
+                                                </div>
+                                            </td>
+                                            <td className="px-8 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <div className="flex justify-end gap-2">
+                                                    <button className="p-2.5 bg-white hover:bg-indigo-50 rounded-lg transition-all border border-slate-200 text-slate-400 hover:text-indigo-600 shadow-sm"><FiEdit3 size={14} /></button>
+                                                    <button className="p-2.5 bg-white hover:bg-rose-50 rounded-lg transition-all border border-slate-200 text-slate-400 hover:text-rose-500 shadow-sm"><FiTrash2 size={14} /></button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="px-8 py-4 border-t border-slate-100 text-[9px] font-black text-slate-400 flex items-center justify-between bg-slate-50/50">
+                        <span>SHOWING {filteredTechnicians.length} OPERATIONAL NODES</span>
+                    </div>
+                </div>
+            ) : (
+                /* Performance Yield Analysis View */
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[600px]">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-[10px] font-bold uppercase tracking-tight border-collapse">
+                            {/* High-Density Multi-layered Header */}
+                            <thead className="bg-[#1e293b] text-white/50">
+                                <tr>
+                                    <th rowSpan={2} className="px-6 py-6 bg-[#0f172a] text-white min-w-[240px] border-r border-white/5">PERSONNEL / PETUGAS</th>
+                                    <th rowSpan={2} className="px-6 py-6 bg-[#0f172a] text-white min-w-[140px] border-r border-white/5">KANWIL</th>
+                                    <th colSpan={2} className="px-4 py-3 bg-blue-500/10 text-blue-400 text-center border-r border-white/5 border-b border-white/5 tracking-[0.2em] font-black">PREVENTIVE (PM)</th>
+                                    <th colSpan={2} className="px-4 py-3 bg-amber-500/10 text-amber-400 text-center border-r border-white/5 border-b border-white/5 tracking-[0.2em] font-black">CORRECTIVE (CM)</th>
+                                    <th colSpan={2} className="px-4 py-3 bg-slate-700/30 text-slate-300 text-center border-r border-white/5 border-b border-white/5 tracking-[0.2em] font-black uppercase">JUMLAH</th>
+                                    <th rowSpan={2} className="px-10 py-6 bg-[#450a0a] text-rose-400 text-center tracking-[0.3em] font-black">OUT SLA %</th>
+                                </tr>
+                                <tr className="bg-[#1e293b] border-b border-white/5 text-[9px]">
+                                    <th className="px-4 py-4 text-center border-r border-white/5 bg-blue-500/5">IN SLA</th>
+                                    <th className="px-4 py-4 text-center border-r border-white/5 bg-blue-500/5">OUT SLA</th>
+                                    <th className="px-4 py-4 text-center border-r border-white/5 bg-amber-500/5">IN SLA</th>
+                                    <th className="px-4 py-4 text-center border-r border-white/5 bg-amber-500/5">OUT SLA</th>
+                                    <th className="px-4 py-4 text-center border-r border-white/5 uppercase">IN SLA</th>
+                                    <th className="px-4 py-4 text-center border-r border-white/5 uppercase">OUT SLA</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {loading ? (
+                                    <tr>
+                                        <td colSpan={9} className="py-24 text-center">
+                                            <div className="flex flex-col items-center gap-4">
+                                                <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                                                <span className="text-[11px] font-black text-slate-300 uppercase tracking-[0.4em]">Aggregating Performance Hub...</span>
                                             </div>
                                         </td>
                                     </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
+                                ) : performanceData.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={9} className="py-32 text-center">
+                                            <div className="flex flex-col items-center opacity-20">
+                                                <FiActivity size={48} />
+                                                <span className="text-[10px] font-black uppercase tracking-[0.5em] mt-4 text-slate-900">Zero Maintenance Logs Found</span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    performanceData.map(d => (
+                                        <tr key={d.id} className="hover:bg-slate-50 transition-colors group">
+                                            <td className="px-6 py-4.5 border-r border-slate-100">
+                                                <div className="text-[12px] font-[950] text-slate-900 tracking-tight">{d.name}</div>
+                                            </td>
+                                            <td className="px-6 py-4.5 border-r border-slate-100">
+                                                <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200 tracking-wider inline-block">{d.kanwil}</span>
+                                            </td>
+                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 border-blue-50 bg-blue-50/10 transition-colors group-hover:bg-blue-50/20 font-black text-[12px] tabular-nums text-blue-600">{d.pmMeet}</td>
+                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 font-bold text-[12px] tabular-nums text-rose-400">{d.pmMiss}</td>
+                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 border-amber-50 bg-amber-50/10 transition-colors group-hover:bg-amber-50/20 font-black text-[12px] tabular-nums text-amber-600">{d.cmMeet}</td>
+                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 font-bold text-[12px] tabular-nums text-rose-400">{d.cmMiss}</td>
+                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 bg-slate-50/50 font-[950] text-[13px] tabular-nums text-slate-800">{d.totalIn}</td>
+                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 bg-slate-50/50 font-[950] text-[13px] tabular-nums text-rose-600">{d.totalOut}</td>
+                                            <td className={`px-10 py-4.5 text-center ${d.outPercent > 15 ? 'bg-rose-50/50' : d.outPercent > 5 ? 'bg-amber-50/50' : 'bg-emerald-50/50'} transition-colors`}>
+                                                <div className="flex flex-col items-center">
+                                                    <span className={`text-[15px] font-[1000] tabular-nums leading-none ${d.outPercent > 15 ? 'text-rose-600' : d.outPercent > 5 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                                        {d.outPercent}%
+                                                    </span>
+                                                    <div className="w-12 h-1 bg-slate-200 rounded-full mt-2 overflow-hidden flex">
+                                                        <div className={`h-full ${d.outPercent > 15 ? 'bg-rose-500' : d.outPercent > 5 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${100 - d.outPercent}%` }} />
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* Modal: Tambah Teknisi */}
             <AnimatePresence>
                 {isModalOpen && (
                     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="bg-white p-10 rounded-[3rem] w-full max-w-md relative border border-white">
+                        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="bg-white p-10 rounded-none w-full max-w-md relative border border-white shadow-2xl">
                             <button onClick={() => setIsModalOpen(false)} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900 transition-colors text-xl font-black">✕</button>
-                            <h2 className="text-3xl font-black text-slate-900 mb-8 tracking-tighter uppercase">Technician Profile</h2>
+                            <h2 className="text-3xl font-black text-slate-900 mb-8 tracking-tighter uppercase leading-none">Personnel Profile</h2>
                             <form onSubmit={handleAddTech} className="space-y-5">
                                 <div className="flex flex-col gap-1.5">
-                                    <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 ml-4">Full Name</label>
-                                    <input required type="text" value={newTech.name} onChange={(e) => setNewTech({...newTech, name: e.target.value})} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 focus:ring-2 focus:ring-blue-500 outline-none font-bold" />
+                                    <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 ml-4">Full Identity</label>
+                                    <input required type="text" value={newTech.name} onChange={(e) => setNewTech({...newTech, name: e.target.value})} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-[13px] transition-all" placeholder="Enter Full Name..." />
                                 </div>
                                 <div className="flex flex-col gap-1.5">
-                                    <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 ml-4">Kanwil</label>
-                                    <select required value={newTech.kanwil_id} onChange={(e) => setNewTech({...newTech, kanwil_id: e.target.value})} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 focus:ring-2 focus:ring-blue-500 outline-none font-bold">
-                                        <option value="">-- Pilih --</option>
+                                    <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 ml-4">Operational Region</label>
+                                    <select required value={newTech.kanwil_id} onChange={(e) => setNewTech({...newTech, kanwil_id: e.target.value})} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-[13px] transition-all">
+                                        <option value="">SELECT REGION...</option>
                                         {kanwils.map(kw => <option key={kw.id} value={kw.id}>{kw.name}</option>)}
                                     </select>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="flex flex-col gap-1.5">
-                                        <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 ml-4">Specialty</label>
-                                        <input type="text" value={newTech.specialty} onChange={(e) => setNewTech({...newTech, specialty: e.target.value})} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 focus:ring-2 focus:ring-blue-500 outline-none font-bold" />
+                                        <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 ml-4">Specialization</label>
+                                        <input type="text" value={newTech.specialty} onChange={(e) => setNewTech({...newTech, specialty: e.target.value})} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-[13px] transition-all" placeholder="e.g. Mechanical" />
                                     </div>
                                     <div className="flex flex-col gap-1.5">
-                                        <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 ml-4">Phone</label>
-                                        <input type="text" value={newTech.phone} onChange={(e) => setNewTech({...newTech, phone: e.target.value})} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 focus:ring-2 focus:ring-blue-500 outline-none font-bold" />
+                                        <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 ml-4">Contact Phone</label>
+                                        <input type="text" value={newTech.phone} onChange={(e) => setNewTech({...newTech, phone: e.target.value})} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none font-bold text-[13px] transition-all" placeholder="0812..." />
                                     </div>
                                 </div>
-                                <button disabled={isSaving} type="submit" className="btn-dongker w-full py-5 mt-4 text-xs tracking-[0.3em] uppercase">{isSaving ? 'MEMPROSES...' : 'SAVE TECHNICIAN'}</button>
+                                <button disabled={isSaving} type="submit" className="w-full py-6 mt-6 bg-slate-900 border border-slate-800 text-white rounded-3xl font-[1000] text-[11px] tracking-[0.4em] uppercase shadow-2xl shadow-indigo-100 hover:bg-black hover:-translate-y-1 active:scale-95 transition-all">
+                                    {isSaving ? 'REGISTERING...' : 'COMMIT PROFILE'}
+                                </button>
                             </form>
                         </motion.div>
                     </div>
                 )}
             </AnimatePresence>
 
+            {/* Import Preview Modal */}
             <AnimatePresence>
                 {isPreviewModalOpen && (
-                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-[4rem] shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden border border-white">
+                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[105] flex items-center justify-center p-4">
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-none w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-white shadow-2xl">
                             <div className="p-10 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                                 <div>
-                                    <h2 className="text-3xl font-[950] text-slate-900 tracking-tighter uppercase leading-none">Personnel Audit</h2>
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 ml-1">Technician Entry Verification</p>
+                                    <div className="flex items-center gap-3 mb-1">
+                                        <div className="w-2 h-2 bg-indigo-600 rounded-full animate-ping" />
+                                        <h2 className="text-2xl font-[950] text-slate-900 tracking-tighter uppercase leading-none">Personnel Audit</h2>
+                                    </div>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-5">Technician Entry Verification</p>
                                 </div>
-                                <button onClick={() => setIsPreviewModalOpen(false)} className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 shadow-sm border border-slate-100">✕</button>
+                                <button onClick={() => setIsPreviewModalOpen(false)} className="w-10 h-10 hover:bg-slate-100 rounded-xl flex items-center justify-center text-slate-300 hover:text-rose-500 transition-all border border-slate-100">✕</button>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto p-12 space-y-12">
+                            <div className="flex-1 overflow-y-auto p-10 space-y-8">
                                 <div className="grid grid-cols-3 gap-6">
                                     {[
-                                        { label: 'Total Scanned', val: importData.newRecords.length + importData.duplicateRecords.length, c: 'blue' },
+                                        { label: 'Total Scanned', val: importData.newRecords.length + importData.duplicateRecords.length, c: 'indigo' },
                                         { label: 'Authorized New', val: importData.newRecords.length, c: 'emerald' },
                                         { label: 'Already Registered', val: importData.duplicateRecords.length, c: 'rose' }
                                     ].map(s => (
-                                        <div key={s.label} className={`p-8 bg-${s.c}-50/30 border border-${s.c}-100 rounded-[2.5rem] relative overflow-hidden group`}>
-                                            <div className="text-[10px] font-black uppercase text-slate-300 tracking-widest mb-1">{s.label}</div>
-                                            <div className={`text-4xl font-[950] text-${s.c}-600 tracking-tighter`}>{s.val}</div>
-                                            <div className={`absolute -right-4 -bottom-4 w-16 h-16 bg-${s.c}-400/5 rounded-full`} />
+                                        <div key={s.label} className={`p-8 bg-white border border-slate-200 rounded-[2rem] relative overflow-hidden group shadow-sm`}>
+                                            <div className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-1">{s.label}</div>
+                                            <div className={`text-4xl font-[950] text-slate-900 tracking-tighter`}>{s.val}</div>
+                                            <div className={`absolute bottom-0 left-0 w-full h-1.5 ${s.c === 'indigo' ? 'bg-indigo-500' : s.c === 'emerald' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                                         </div>
                                     ))}
                                 </div>
 
-                                <div className="bg-slate-50 border border-slate-100 rounded-[3rem] overflow-hidden shadow-inner font-bold">
-                                    <div className="max-h-[400px] overflow-y-auto">
+                                <div className="bg-white border border-slate-200 rounded-[2.5rem] overflow-hidden shadow-sm">
+                                    <div className="max-h-[500px] overflow-y-auto">
                                         <table className="w-full text-left text-[11px] uppercase tracking-tight">
-                                            <thead className="sticky top-0 bg-white border-b border-slate-100 font-black text-slate-300 z-10">
+                                            <thead className="sticky top-0 bg-slate-50 border-b border-slate-100 font-black text-slate-400 z-10">
                                                 <tr>
                                                     <th className="px-10 py-6">Technician Name</th>
                                                     <th className="px-10 py-6 text-center">Kanwil Node</th>
                                                     <th className="px-10 py-6 text-right">Primary Specialty</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-slate-100 font-bold bg-white/40">
+                                            <tbody className="divide-y divide-slate-100 font-bold bg-white">
                                                 {importData.newRecords.map((r, i) => (
-                                                    <tr key={i} className="hover:bg-emerald-50/20">
-                                                        <td className="px-10 py-4 text-slate-900">{r.name}</td>
-                                                        <td className="px-10 py-4 text-center text-slate-400">{r.kanwil_name}</td>
-                                                        <td className="px-10 py-4 text-right text-blue-600 italic">{r.specialty}</td>
+                                                    <tr key={i} className="hover:bg-indigo-50/30 transition-colors">
+                                                        <td className="px-10 py-5 text-slate-900 font-[900]">{r.name}</td>
+                                                        <td className="px-10 py-5 text-center text-slate-500 font-black">
+                                                            <span className="bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">{r.kanwil_name}</span>
+                                                        </td>
+                                                        <td className="px-10 py-5 text-right text-indigo-600 italic font-black">{r.specialty}</td>
                                                     </tr>
                                                 ))}
-                                                {importData.newRecords.length === 0 && <tr><td colSpan="3" className="py-20 text-center text-slate-300 font-black tracking-widest italic opacity-50">No Authorized Personnel to Batch</td></tr>}
+                                                {importData.newRecords.length === 0 && <tr><td colSpan="3" className="py-32 text-center text-slate-300 font-black tracking-widest italic opacity-50">No Authorized Personnel to Batch</td></tr>}
                                             </tbody>
                                         </table>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="p-12 bg-slate-50/80 backdrop-blur-xl border-t border-slate-100 flex gap-8">
-                                <button onClick={() => setIsPreviewModalOpen(false)} className="flex-1 py-7 bg-white border border-slate-200 text-slate-400 rounded-3xl font-black text-[12px] tracking-[0.2em] uppercase hover:bg-slate-100 transition-all">Abort Sync</button>
-                                <button onClick={confirmImport} disabled={isSaving || importData.newRecords.length === 0} className="flex-[2] bg-blue-600 text-white rounded-[3rem] font-black text-[12px] tracking-[0.4em] uppercase shadow-2xl shadow-blue-200 transition-all disabled:opacity-50">
-                                    Commit {importData.newRecords.length} Personnel
+                            <div className="p-10 bg-slate-50/80 backdrop-blur-xl border-t border-slate-100 flex gap-4">
+                                <button onClick={() => setIsPreviewModalOpen(false)} className="flex-1 py-6 bg-white border border-slate-200 text-slate-400 rounded-3xl font-black text-[12px] tracking-[0.2em] uppercase hover:bg-slate-100 transition-all">Abort Sync</button>
+                                <button onClick={confirmImport} disabled={isSaving || importData.newRecords.length === 0} className="flex-[2] py-6 bg-indigo-600 text-white rounded-3xl font-[1000] text-[12px] tracking-[0.4em] uppercase shadow-2xl shadow-indigo-200 transition-all disabled:opacity-50 hover:bg-indigo-700">
+                                    Commit {importData.newRecords.length} Nodes
                                 </button>
                             </div>
                         </motion.div>

@@ -362,67 +362,63 @@ export default function AssetInventory() {
 
             <AnimatePresence>
                 {isPreviewModalOpen && (
-                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-[4rem] shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden border border-white">
-                            <div className="p-10 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6">
+                        <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-white">
+                            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                                 <div>
-                                    <h2 className="text-3xl font-[950] text-slate-900 tracking-tighter uppercase leading-none">Integrity Analysis</h2>
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 ml-1">Asset Verification Gateway</p>
+                                    <div className="flex items-center gap-3 mb-1">
+                                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-ping" />
+                                        <h2 className="text-2xl font-[950] text-slate-900 tracking-tighter uppercase leading-none">Integrity Analysis</h2>
+                                    </div>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-5">Asset Database Synchronization</p>
                                 </div>
-                                <button onClick={() => setIsPreviewModalOpen(false)} className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 shadow-sm border border-slate-100">✕</button>
+                                <button onClick={() => setIsPreviewModalOpen(false)} className="w-10 h-10 hover:bg-slate-100 rounded-xl flex items-center justify-center text-slate-300 hover:text-rose-500 transition-all border border-slate-100">✕</button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-12 space-y-12">
-                                <div className="grid grid-cols-3 gap-6">
+
+                            <div className="flex-1 overflow-y-auto p-8 space-y-8">
+                                <div className="grid grid-cols-3 gap-4">
                                     {[
-                                        { label: 'Scanned', val: importData.newRecords.length + importData.duplicateRecords.length, c: 'indigo' },
-                                        { label: 'Clean Records', val: importData.newRecords.length, c: 'emerald' },
-                                        { label: 'Duplicates', val: importData.duplicateRecords.length, c: 'rose' }
+                                        { label: 'Total Scanned', val: importData.newRecords.length + importData.duplicateRecords.length, c: 'blue' },
+                                        { label: 'Authorized New', val: importData.newRecords.length, c: 'emerald' },
+                                        { label: 'Already Registered', val: importData.duplicateRecords.length, c: 'rose' }
                                     ].map(s => (
-                                        <div key={s.label} className={`p-8 bg-${s.c}-50/30 border border-${s.c}-100 rounded-[2.5rem] relative overflow-hidden group`}>
-                                            <div className="text-[10px] font-black uppercase text-slate-300 tracking-widest mb-1">{s.label}</div>
-                                            <div className={`text-4xl font-[950] text-${s.c}-600 tracking-tighter`}>{s.val}</div>
-                                            <div className={`absolute -right-4 -bottom-4 w-16 h-16 bg-${s.c}-400/5 rounded-full`} />
+                                        <div key={s.label} className={`p-6 bg-${s.c}-50/30 border border-${s.c}-100 rounded-xl relative overflow-hidden group`}>
+                                            <div className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-1">{s.label}</div>
+                                            <div className={`text-3xl font-[950] text-${s.c}-600 tracking-tighter`}>{s.val}</div>
                                         </div>
                                     ))}
                                 </div>
-                                <div className="bg-slate-50 border border-slate-100 rounded-[3rem] overflow-hidden shadow-inner font-bold">
+
+                                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm font-bold">
                                     <div className="max-h-[400px] overflow-y-auto">
                                         <table className="w-full text-left text-[11px] uppercase tracking-tight">
-                                            <thead className="bg-white border-b border-slate-100 text-slate-300 sticky top-0 z-10">
+                                            <thead className="sticky top-0 bg-white border-b border-slate-100 font-black text-slate-300 z-10">
                                                 <tr>
-                                                    <th className="px-10 py-6">Terminal ID</th>
-                                                    <th className="px-10 py-6">Site Description</th>
-                                                    <th className="px-10 py-6 text-center">Kanwil</th>
-                                                    <th className="px-10 py-6 text-right">Engineer</th>
+                                                    <th className="px-10 py-6">Asset Descriptor</th>
+                                                    <th className="px-10 py-6 text-center">Kanwil Node</th>
+                                                    <th className="px-10 py-6 text-right">Identifier (TID)</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-slate-100/50 bg-white/40">
+                                            <tbody className="divide-y divide-slate-100 font-bold bg-white/40">
                                                 {importData.newRecords.map((r, i) => (
-                                                    <tr key={i} className="hover:bg-emerald-50/20">
-                                                        <td className="px-10 py-4 text-indigo-600 font-mono">{r.tid}</td>
-                                                        <td className="px-10 py-4 text-slate-600 truncate max-w-[250px]">{r.name}</td>
-                                                        <td className="px-10 py-4 text-center text-slate-400 font-black">{r.kanwil_name}</td>
-                                                        <td className="px-10 py-4 text-right opacity-40 italic">{r.tech_name}</td>
+                                                    <tr key={i} className="hover:bg-emerald-50/20 transition-all">
+                                                        <td className="px-10 py-4 text-slate-900">{r.name}</td>
+                                                        <td className="px-10 py-4 text-center text-slate-400">{r.kanwil_name}</td>
+                                                        <td className="px-10 py-4 text-right text-blue-600 font-mono tracking-tighter">{r.tid}</td>
                                                     </tr>
                                                 ))}
-                                                {importData.newRecords.length === 0 && (
-                                                    <tr><td colSpan="4" className="py-20 text-center text-slate-300 font-black tracking-widest italic opacity-50">No Clean Records to Display</td></tr>
-                                                )}
+                                                {importData.newRecords.length === 0 && <tr><td colSpan="3" className="py-20 text-center text-slate-300 font-black tracking-widest italic opacity-50">No Authorized Assets to Batch</td></tr>}
                                             </tbody>
                                         </table>
                                     </div>
                                 </div>
-                                {importData.duplicateRecords.length > 0 && (
-                                    <div className="p-6 bg-rose-50/50 rounded-2xl border border-dashed border-rose-200 text-center">
-                                        <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest italic">
-                                            Notice: {importData.duplicateRecords.length} TIDs already exist and will be automatically filtered out.
-                                        </p>
-                                    </div>
-                                )}
                             </div>
-                            <div className="p-12 bg-slate-50/80 backdrop-blur-xl border-t border-slate-100 flex gap-8">
-                                <button onClick={() => setIsPreviewModalOpen(false)} className="flex-1 py-7 bg-white border border-slate-200 text-slate-400 rounded-3xl font-black text-[12px] tracking-[0.2em] uppercase hover:bg-slate-100 transition-all">Abort Batch</button>
-                                <button onClick={confirmImport} disabled={isSaving || importData.newRecords.length === 0} className="flex-[2] bg-indigo-600 text-white rounded-[3rem] font-black text-[12px] tracking-[0.4em] uppercase shadow-2xl shadow-indigo-200 disabled:opacity-50 hover:bg-indigo-700 transition-all">Commit {importData.newRecords.length} Assets</button>
+
+                            <div className="p-8 bg-slate-50/80 backdrop-blur-xl border-t border-slate-100 flex gap-4">
+                                <button onClick={() => setIsPreviewModalOpen(false)} className="flex-1 py-5 bg-white border border-slate-200 text-slate-400 rounded-xl font-black text-[12px] tracking-[0.2em] uppercase hover:bg-slate-100 transition-all">Abort Sync</button>
+                                <button onClick={confirmImport} disabled={isSaving || importData.newRecords.length === 0} className="flex-[2] bg-blue-600 text-white rounded-xl font-black text-[12px] tracking-[0.4em] uppercase shadow-lg shadow-blue-200 transition-all disabled:opacity-50">
+                                    Commit {importData.newRecords.length} Assets
+                                </button>
                             </div>
                         </motion.div>
                     </div>
