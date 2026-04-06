@@ -843,31 +843,35 @@ export default function MaintenanceTracker() {
 
             <AnimatePresence>
                 {isPreviewModalOpen && (
-                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-[4rem] shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden border border-white">
-                            <div className="p-10 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6">
+                        <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-white">
+                            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                                 <div>
-                                    <h2 className="text-3xl font-[950] text-slate-900 tracking-tighter uppercase leading-none">Analysis Hub</h2>
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 ml-1">Scan Integrity Verification</p>
+                                    <div className="flex items-center gap-3 mb-1">
+                                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-ping" />
+                                        <h2 className="text-2xl font-[950] text-slate-900 tracking-tighter uppercase leading-none">Analysis Hub</h2>
+                                    </div>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-5">Operational Integrity Protocol</p>
                                 </div>
-                                <button onClick={() => setIsPreviewModalOpen(false)} className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 shadow-sm border border-slate-100">✕</button>
+                                <button onClick={() => setIsPreviewModalOpen(false)} className="w-10 h-10 hover:bg-slate-100 rounded-xl flex items-center justify-center text-slate-300 hover:text-rose-500 transition-all border border-slate-100">✕</button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-12 space-y-12">
-                                <div className="grid grid-cols-4 gap-6">
+
+                            <div className="flex-1 overflow-y-auto p-8 space-y-8">
+                                <div className="grid grid-cols-4 gap-4">
                                     {[
                                         { label: 'Scanned', val: importData.newRecords.length + importData.updateRecords.length + importData.skipCount, c: 'blue' },
                                         { label: 'New Records', val: importData.newRecords.length, c: 'emerald' },
                                         { label: 'To Update', val: importData.updateRecords.length, c: 'amber' },
                                         { label: 'Skipped', val: importData.skipCount, c: 'slate' }
                                     ].map(s => (
-                                        <div key={s.label} className={`p-8 bg-${s.c}-50/30 border border-${s.c}-100 rounded-[2.5rem] relative overflow-hidden group`}>
-                                            <div className="text-[10px] font-black uppercase text-slate-300 tracking-widest mb-1">{s.label}</div>
-                                            <div className={`text-4xl font-[950] text-${s.c}-600 tracking-tighter`}>{s.val}</div>
-                                            <div className={`absolute -right-4 -bottom-4 w-16 h-16 bg-${s.c}-400/5 rounded-full`} />
+                                        <div key={s.label} className={`p-6 bg-${s.c}-50/30 border border-${s.c}-100 rounded-xl relative overflow-hidden group`}>
+                                            <div className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-1">{s.label}</div>
+                                            <div className={`text-3xl font-[950] text-${s.c}-600 tracking-tighter`}>{s.val}</div>
                                         </div>
                                     ))}
                                 </div>
-                                <div className="bg-slate-50 border border-slate-100 rounded-[3rem] overflow-hidden shadow-inner font-bold">
+
+                                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm font-bold">
                                     <div className="max-h-[400px] overflow-y-auto">
                                         <table className="w-full text-left text-[11px] uppercase tracking-tight">
                                             <thead className="bg-white border-b border-slate-100 text-slate-300 sticky top-0 z-10">
@@ -903,9 +907,11 @@ export default function MaintenanceTracker() {
                                     </div>
                                 </div>
                             </div>
-                            <div className="p-12 bg-slate-50/80 backdrop-blur-xl border-t border-slate-100 flex gap-8">
-                                <button onClick={() => setIsPreviewModalOpen(false)} className="flex-1 py-7 bg-white border border-slate-200 text-slate-400 rounded-3xl font-black text-[12px] tracking-[0.2em] uppercase hover:bg-slate-100 transition-all">Abort Batch</button>
-                                <button onClick={confirmImport} disabled={isSaving || (importData.newRecords.length + importData.updateRecords.length === 0)} className="flex-[2] bg-emerald-600 text-white rounded-[3rem] font-black text-[12px] tracking-[0.4em] uppercase shadow-2xl shadow-emerald-200 disabled:opacity-50 hover:bg-emerald-700 transition-all">Commit {importData.newRecords.length + importData.updateRecords.length} Records</button>
+                            <div className="p-8 bg-slate-50/80 backdrop-blur-xl border-t border-slate-100 flex gap-4">
+                                <button onClick={() => setIsPreviewModalOpen(false)} className="flex-1 py-5 bg-white border border-slate-200 text-slate-400 rounded-xl font-black text-[12px] tracking-[0.2em] uppercase hover:bg-slate-100 transition-all">Abort Sync</button>
+                                <button onClick={confirmImport} disabled={isSaving || (importData.newRecords.length === 0 && importData.updateRecords.length === 0)} className="flex-[2] bg-blue-600 text-white rounded-xl font-black text-[12px] tracking-[0.4em] uppercase shadow-lg shadow-blue-200 transition-all disabled:opacity-50">
+                                    {isSaving ? 'Processing...' : `Commit ${importData.newRecords.length + importData.updateRecords.length} Changes`}
+                                </button>
                             </div>
                         </motion.div>
                     </div>
