@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { FiUpload, FiPlus, FiUser, FiMapPin, FiBox, FiXCircle, FiCheckCircle, FiInfo, FiAlertCircle } from 'react-icons/fi';
+import { FiUpload, FiPlus, FiUser, FiMapPin, FiBox, FiXCircle, FiCheckCircle, FiInfo, FiAlertCircle, FiDatabase, FiSearch, FiList, FiActivity, FiTool } from 'react-icons/fi';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile } from '../../utils/excelHandler';
 
@@ -20,6 +20,7 @@ export default function AssetInventory() {
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
     const [technicians, setTechnicians] = useState([]);
     const [newAsset, setNewAsset] = useState({ tid: '', name: '', location: '', kanwil_id: '', pic_id: '', kc_supervisi: '', dk_lk: 'DK' });
 
@@ -50,7 +51,7 @@ export default function AssetInventory() {
         }
     };
 
-    const fetchAssets = async (kanwilId = 'all', limit = pageSize, picId = null) => {
+    const fetchAssets = async (kanwilId = selectedKanwil, limit = pageSize, picId = null) => {
         setLoading(true);
         let query = supabase.from('managed_assets').select(`
             *,
@@ -64,7 +65,7 @@ export default function AssetInventory() {
         if (limit !== 'all') {
             query = query.limit(limit);
         } else {
-            query = query.limit(1000); // Protection cap
+            query = query.limit(2000); // 2000 for "All" safety cap
         }
         
         const { data, error } = await query.order('tid', { ascending: true });
@@ -72,6 +73,18 @@ export default function AssetInventory() {
         else setAssets(data || []);
         setLoading(false);
     };
+
+    const filteredAssets = useMemo(() => {
+        const s = searchTerm.toLowerCase();
+        if (!s) return assets;
+        return assets.filter(a => 
+            a.tid?.toString().toLowerCase().includes(s) || 
+            a.name?.toLowerCase().includes(s) || 
+            a.location?.toLowerCase().includes(s) ||
+            a.technicians?.name?.toLowerCase().includes(s) ||
+            a.kc_supervisi?.toLowerCase().includes(s)
+        );
+    }, [assets, searchTerm]);
 
     const handleExcelUpload = async (e) => {
         const file = e.target.files[0];
@@ -171,124 +184,144 @@ export default function AssetInventory() {
     };
 
     return (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-8 max-w-7xl mx-auto">
-            <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleExcelUpload} 
-                accept=".xlsx, .xls" 
-                className="hidden" 
-            />
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 max-w-[1600px] mx-auto bg-slate-50/50 min-h-screen">
+            <input type="file" ref={fileInputRef} onChange={handleExcelUpload} accept=".xlsx, .xls" className="hidden" />
             
-            {/* Header Section */}
-            <div className="flex justify-between items-end mb-10 pb-6 border-b border-slate-200 uppercase">
-                <div>
-                    <div className="flex items-center gap-2 mb-2">
-                        <span className="w-2 h-8 bg-blue-600 rounded-full shadow-sm shadow-blue-500/20" />
-                        <h1 className="text-4xl font-black text-slate-900 tracking-tight leading-none">Master Data</h1>
+            {/* ═══ Header ═══ */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm mb-4 overflow-hidden">
+                {/* Top Row: Title + Stats + Actions */}
+                <div className="flex flex-col lg:flex-row items-center justify-between gap-4 px-6 py-5">
+                    {/* Brand */}
+                    <div className="flex items-center gap-4">
+                        <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
+                            <FiDatabase size={20} />
+                        </div>
+                        <div>
+                            <h1 className="text-lg font-[950] text-slate-900 leading-none tracking-tight">Master Asset Hub</h1>
+                            <p className="text-[9px] font-bold text-slate-400 tracking-[0.15em] mt-1 uppercase">Centralized Inventory Control</p>
+                        </div>
                     </div>
-                    <p className="text-slate-500 font-bold text-xs tracking-widest pl-4">Asset Inventory Management System</p>
-                    <div className="flex items-center gap-2 mt-4 ml-4">
-                        <span className="text-[10px] uppercase font-black text-slate-400 tracking-widest min-w-[100px]">Total Asset</span>
-                        <div className="bg-blue-50 text-blue-600 px-3 py-1 rounded-lg border border-blue-100 font-black text-sm">{assets.length}</div>
+
+                    {/* Stats Chips */}
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 border-l-[3px] border-indigo-400 bg-indigo-50/60 pl-3 pr-4 py-2 rounded-r-lg">
+                            <div>
+                                <div className="text-[8px] font-bold text-indigo-600/60 uppercase tracking-wider">Total Assets</div>
+                                <div className="text-xl font-[950] text-indigo-600 leading-none tabular-nums mt-0.5">{assets.length}</div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 border-l-[3px] border-emerald-400 bg-emerald-50/60 pl-3 pr-4 py-2 rounded-r-lg">
+                            <div>
+                                <div className="text-[8px] font-bold text-emerald-600/60 uppercase tracking-wider">Operational</div>
+                                <div className="text-xl font-[950] text-emerald-600 leading-none tabular-nums mt-0.5">{assets.filter(a => a.status === 'operational').length}</div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 border-l-[3px] border-slate-300 bg-slate-50 pl-3 pr-4 py-2 rounded-r-lg">
+                            <div>
+                                <div className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Monitoring</div>
+                                <div className="text-xl font-[950] text-slate-700 leading-none tabular-nums mt-0.5">{assets.filter(a => a.dk_lk === 'LK').length}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Quick Access */}
+                    <div className="flex items-center gap-2">
+                        <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-50 transition-all">
+                            <FiSearch size={13} className="text-slate-300" />
+                            <input type="text" placeholder="Search TID, Site, Technician..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-transparent border-none outline-none text-[10px] font-bold text-slate-700 w-48 ml-2 placeholder:text-slate-300" />
+                        </div>
+                        <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-black text-[9px] tracking-wider uppercase transition-all shadow-sm active:scale-95">
+                            <FiPlus size={13} /> Asset
+                        </button>
+                        <button onClick={() => fileInputRef.current.click()} className="p-2 bg-slate-50 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg border border-slate-200 hover:border-indigo-200 transition-all" title="Import Data">
+                            <FiUpload size={14} />
+                        </button>
                     </div>
                 </div>
-                <div className="flex gap-4 items-center">
-                    <button 
-                        onClick={() => fileInputRef.current.click()}
-                        disabled={loading}
-                        className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-xs tracking-widest uppercase hover:bg-slate-50 transition-all shadow-sm flex items-center gap-2"
-                    >
-                        <FiUpload className="text-lg" /> Import Data
-                    </button>
-                    <select 
-                        value={selectedKanwil}
-                        onChange={(e) => {
-                            setSelectedKanwil(e.target.value);
-                            navigate('/assets');
-                            fetchAssets(e.target.value);
-                        }}
-                        className="bg-white border border-slate-200 rounded-xl px-6 py-3 text-xs font-black uppercase tracking-widest text-slate-700 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer hover:border-slate-300"
-                    >
-                        <option value="all">Seluruh Wilayah</option>
-                        {kanwils.map(kw => <option key={kw.id} value={kw.id}>{kw.name}</option>)}
-                    </select>
-                    <select 
-                        value={pageSize}
-                        onChange={(e) => {
+
+                {/* Bottom Row: Filters Bar */}
+                <div className="flex flex-wrap items-center gap-5 px-6 py-2.5 bg-slate-50/50 border-t border-slate-100">
+                    <div className="flex items-center gap-2">
+                        <FiMapPin size={12} className="text-slate-300" />
+                        <select value={selectedKanwil} onChange={(e) => { setSelectedKanwil(e.target.value); navigate('/assets'); fetchAssets(e.target.value, pageSize); }} className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-[9px] font-bold text-slate-600 outline-none cursor-pointer hover:border-indigo-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50 transition-all">
+                            <option value="all">Seluruh Wilayah</option>
+                            {kanwils.map(kw => <option key={kw.id} value={kw.id}>{kw.name}</option>)}
+                        </select>
+                    </div>
+                    <div className="w-px h-4 bg-slate-200" />
+                    <div className="flex items-center gap-2">
+                        <FiList size={12} className="text-slate-300" />
+                        <select value={pageSize} onChange={(e) => { 
                             const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value);
                             setPageSize(val);
                             localStorage.setItem('pageSize', val);
                             fetchAssets(selectedKanwil, val);
-                        }}
-                        className="bg-white border border-slate-200 rounded-xl px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 shadow-sm outline-none cursor-pointer hover:border-slate-300 transition-all"
-                    >
-                        <option value={20}>20 Rows</option>
-                        <option value={50}>50 Rows</option>
-                        <option value={100}>100 Rows</option>
-                        <option value="all">Show All</option>
-                    </select>
-                    <button 
-                        onClick={() => setIsModalOpen(true)}
-                        className="btn-dongker shadow-lg shadow-blue-200 flex items-center gap-2 h-[46px]"
-                    >
-                        <FiPlus className="text-lg" /> Tambah Asset
-                    </button>
+                        }} className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-[9px] font-bold text-slate-600 outline-none cursor-pointer hover:border-indigo-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50 transition-all">
+                            <option value={50}>Limit 50 Rows</option>
+                            <option value={100}>Limit 100 Rows</option>
+                            <option value={200}>Limit 200 Rows</option>
+                            <option value="all">Unlimited View</option>
+                        </select>
+                    </div>
+                    <div className="ml-auto flex items-center gap-2">
+                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest italic">Database Live Sync</span>
+                        <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shadow-sm shadow-emerald-200" />
+                    </div>
                 </div>
             </div>
 
             {/* Assets Table */}
-            <div className="bg-white border border-slate-200 rounded-3xl shadow-xl shadow-slate-200/50 overflow-hidden transition-all duration-500">
-                <table className="w-full text-left border-collapse">
-                    <thead className="bg-slate-50 text-slate-500 border-b border-slate-100 uppercase text-[10px] tracking-widest font-black">
-                        <tr>
-                            <th className="px-8 py-5">TID</th>
-                            <th className="px-8 py-5">Lokasi / Site Name</th>
-                            <th className="px-8 py-5">KC Supervisi</th>
-                            <th className="px-8 py-5">Status Ops</th>
-                            <th className="px-8 py-5">Kanwil</th>
-                            <th className="px-8 py-5">PIC Teknisi</th>
-                            <th className="px-8 py-5 text-right">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody className="text-slate-700 divide-y divide-slate-50">
-                        {loading ? (
-                            [1, 2, 3, 4, 5, 6].map(i => <tr key={i} className="h-20 animate-pulse"><td colSpan="7" className="px-8"><div className="h-4 bg-slate-100 rounded-full w-full" /></td></tr>)
-                        ) : assets.length === 0 ? (
-                            <tr><td colSpan="7" className="py-32 text-center text-slate-400 font-medium italic">Belum ada data asset.</td></tr>
-                        ) : (
-                            assets.map((asset) => (
-                                <tr key={asset.id} className="hover:bg-blue-50/30 transition-all group">
-                                    <td className="px-8 py-6 uppercase tracking-tight">
-                                        <span className="font-mono font-black text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg text-sm border border-blue-100">{asset.tid || '---'}</span>
-                                    </td>
-                                    <td className="px-8 py-6">
-                                        <div className="font-black text-slate-900 group-hover:text-blue-700 transition-colors uppercase tracking-tight">{asset.name}</div>
-                                        <div className="text-[11px] text-slate-400 font-bold uppercase tracking-tight mt-0.5">{asset.location || 'No Address'}</div>
-                                    </td>
-                                    <td className="px-8 py-6 text-xs font-bold text-slate-500 uppercase tracking-tight italic">{asset.kc_supervisi || '---'}</td>
-                                    <td className="px-8 py-6">
-                                        <span className={`badge ${asset.dk_lk === 'LK' ? 'badge-yellow' : 'badge-green'}`}>
-                                            {asset.dk_lk || 'DK'}
-                                        </span>
-                                    </td>
-                                    <td className="px-8 py-6 text-[10px] font-black uppercase text-slate-300 tracking-widest">{asset.kanwils?.code || '---'}</td>
-                                    <td className="px-8 py-6">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 bg-slate-50 rounded-full flex items-center justify-center text-sm border border-slate-100 shadow-sm font-bold text-slate-300">
-                                                <FiUser />
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse table-fixed">
+                        <thead className="bg-slate-100/50 text-slate-400 border-b border-slate-200">
+                            <tr className="text-[9px] font-black tracking-widest uppercase align-middle">
+                                <th className="px-3 py-3 border-r border-slate-200 text-center w-12 bg-slate-200/20">#</th>
+                                <th className="px-3 py-3 border-r border-slate-200 w-24">TID</th>
+                                <th className="px-3 py-3 border-r border-slate-200 w-64">SITE INFORMATION</th>
+                                <th className="px-3 py-3 border-r border-slate-200 text-center w-24">SUPERVISI</th>
+                                <th className="px-3 py-3 border-r border-slate-200 text-center w-20">LOC</th>
+                                <th className="px-3 py-3 border-r border-slate-200 w-28">KANWIL</th>
+                                <th className="px-4 py-3 border-r border-slate-200 w-44">PIC TECHNICIAN</th>
+                                <th className="px-3 py-3 text-center w-24 font-black">STATUS</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                            {loading ? (
+                                Array(10).fill(0).map((_, i) => <tr key={i} className="h-10 animate-pulse"><td colSpan="8" className="px-3"><div className="h-2 bg-slate-50 rounded w-full opacity-60" /></td></tr>)
+                            ) : filteredAssets.length === 0 ? (
+                                <tr><td colSpan="8" className="py-32 text-center text-[10px] font-black text-slate-200 uppercase tracking-[0.5em] italic">Zero Assets Found</td></tr>
+                            ) : (
+                                filteredAssets.map((asset, idx) => (
+                                    <tr key={asset.id} className="text-[10px] uppercase font-bold hover:bg-slate-50 transition-colors group">
+                                        <td className="px-3 py-2 border-r border-slate-100 text-center bg-slate-100/10 text-slate-300 font-mono text-[9px]">{idx + 1}</td>
+                                        <td className="px-3 py-2 border-r border-slate-100 font-mono text-indigo-500 bg-indigo-50/10 text-[9px]">{asset.tid || '---'}</td>
+                                        <td className="px-3 py-2 border-r border-slate-100 truncate pr-4">
+                                            <div className="text-slate-800 tracking-tight">{asset.name}</div>
+                                            <div className="text-[7px] text-slate-300 lowercase italic truncate mt-0.5">{asset.location || 'No physical address found'}</div>
+                                        </td>
+                                        <td className="px-3 py-2 border-r border-slate-100 text-center text-slate-400 text-[8px] italic">{asset.kc_supervisi || '---'}</td>
+                                        <td className="px-3 py-2 border-r border-slate-100 text-center">
+                                            <span className={`px-2 py-0.5 rounded text-[8px] font-black border ${asset.dk_lk === 'LK' ? 'bg-amber-50 text-amber-500 border-amber-100' : 'bg-emerald-50 text-emerald-500 border-emerald-100'}`}>{asset.dk_lk || 'DK'}</span>
+                                        </td>
+                                        <td className="px-3 py-2 border-r border-slate-100 font-black text-slate-300 tracking-widest text-[8px]">{asset.kanwils?.code || '---'}</td>
+                                        <td className="px-4 py-2 border-r border-slate-100 pr-4">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-5 h-5 bg-slate-100 rounded-md border border-slate-200 flex items-center justify-center text-slate-400 text-[8px] font-black">{asset.technicians?.name?.[0] || '?'}</div>
+                                                <span className="truncate text-slate-600">{asset.technicians?.name || 'UNASSIGNED'}</span>
                                             </div>
-                                            <span className="text-xs font-bold text-slate-600 group-hover:text-blue-600 transition-colors uppercase tracking-tight">{asset.technicians?.name || 'Unassigned'}</span>
-                                        </div>
-                                    </td>
-                                    <td className="px-8 py-6 text-right">
-                                        <span className="badge badge-green">Operational</span>
-                                    </td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
+                                        </td>
+                                        <td className="px-3 py-2 text-center align-middle">
+                                            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500 text-white rounded-full text-[8px] font-black shadow-lg shadow-emerald-200">
+                                                <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" /> ACTIVE
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             {/* Modal: Tambah Asset Manual */}
@@ -327,102 +360,69 @@ export default function AssetInventory() {
                 )}
             </AnimatePresence>
 
-            {/* Modal: Import Confirmation Preview */}
             <AnimatePresence>
                 {isPreviewModalOpen && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-                        <motion.div 
-                            initial={{ opacity: 0, y: 20 }} 
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 20 }}
-                            className="bg-white rounded-[3rem] shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden border border-slate-100"
-                        >
-                            <div className="p-10 border-b border-slate-50 flex justify-between items-start">
+                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-[4rem] shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden border border-white">
+                            <div className="p-10 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                                 <div>
-                                    <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase mb-1">Import Confirmation</h2>
-                                    <p className="text-xs font-bold text-slate-400 tracking-widest uppercase">Review data sebelum diproses ke sistem</p>
+                                    <h2 className="text-3xl font-[950] text-slate-900 tracking-tighter uppercase leading-none">Integrity Analysis</h2>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 ml-1">Asset Verification Gateway</p>
                                 </div>
-                                <button onClick={() => setIsPreviewModalOpen(false)} className="text-slate-400 hover:text-red-500 transition-colors text-2xl font-black">✕</button>
+                                <button onClick={() => setIsPreviewModalOpen(false)} className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 shadow-sm border border-slate-100">✕</button>
                             </div>
-
-                            <div className="flex-1 overflow-y-auto p-10 space-y-8">
-                                {/* Summary Stats */}
+                            <div className="flex-1 overflow-y-auto p-12 space-y-12">
                                 <div className="grid grid-cols-3 gap-6">
-                                    <div className="p-6 bg-blue-50 rounded-3xl border border-blue-100">
-                                        <div className="flex items-center gap-3 text-blue-600 mb-2">
-                                            <FiInfo fontSize={20} />
-                                            <span className="text-[10px] font-black uppercase tracking-widest">Total Excel</span>
+                                    {[
+                                        { label: 'Scanned', val: importData.newRecords.length + importData.duplicateRecords.length, c: 'indigo' },
+                                        { label: 'Clean Records', val: importData.newRecords.length, c: 'emerald' },
+                                        { label: 'Duplicates', val: importData.duplicateRecords.length, c: 'rose' }
+                                    ].map(s => (
+                                        <div key={s.label} className={`p-8 bg-${s.c}-50/30 border border-${s.c}-100 rounded-[2.5rem] relative overflow-hidden group`}>
+                                            <div className="text-[10px] font-black uppercase text-slate-300 tracking-widest mb-1">{s.label}</div>
+                                            <div className={`text-4xl font-[950] text-${s.c}-600 tracking-tighter`}>{s.val}</div>
+                                            <div className={`absolute -right-4 -bottom-4 w-16 h-16 bg-${s.c}-400/5 rounded-full`} />
                                         </div>
-                                        <div className="text-4xl font-black text-blue-900">{importData.newRecords.length + importData.duplicateRecords.length}</div>
-                                    </div>
-                                    <div className="p-6 bg-green-50 rounded-3xl border border-green-100">
-                                        <div className="flex items-center gap-3 text-green-600 mb-2">
-                                            <FiCheckCircle fontSize={20} />
-                                            <span className="text-[10px] font-black uppercase tracking-widest">Siap Import</span>
-                                        </div>
-                                        <div className="text-4xl font-black text-green-900">{importData.newRecords.length}</div>
-                                    </div>
-                                    <div className="p-6 bg-amber-50 rounded-3xl border border-amber-100 text-amber-900">
-                                        <div className="flex items-center gap-3 text-amber-600 mb-2">
-                                            <FiAlertCircle fontSize={20} />
-                                            <span className="text-[10px] font-black uppercase tracking-widest">Duplikat (Skip)</span>
-                                        </div>
-                                        <div className="text-4xl font-black text-amber-900">{importData.duplicateRecords.length}</div>
-                                    </div>
+                                    ))}
                                 </div>
-
-                                {/* Preview Data Logic */}
-                                <div className="space-y-4">
-                                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 pl-4">Preview New Data</h4>
-                                    <div className="bg-slate-50 border border-slate-100 rounded-3xl overflow-hidden max-h-64 overflow-y-auto">
-                                        <table className="w-full text-left text-xs">
-                                            <thead className="sticky top-0 bg-white border-b border-slate-100 font-black uppercase text-slate-400">
+                                <div className="bg-slate-50 border border-slate-100 rounded-[3rem] overflow-hidden shadow-inner font-bold">
+                                    <div className="max-h-[400px] overflow-y-auto">
+                                        <table className="w-full text-left text-[11px] uppercase tracking-tight">
+                                            <thead className="bg-white border-b border-slate-100 text-slate-300 sticky top-0 z-10">
                                                 <tr>
-                                                    <th className="px-6 py-4">TID</th>
-                                                    <th className="px-6 py-4">Site Name</th>
-                                                    <th className="px-6 py-4">Kanwil</th>
+                                                    <th className="px-10 py-6">Terminal ID</th>
+                                                    <th className="px-10 py-6">Site Description</th>
+                                                    <th className="px-10 py-6 text-center">Kanwil</th>
+                                                    <th className="px-10 py-6 text-right">Engineer</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {importData.newRecords.length > 0 ? (
-                                                    importData.newRecords.map((r, i) => (
-                                                        <tr key={i} className="hover:bg-green-50/50 transition-colors">
-                                                            <td className="px-6 py-3 font-mono font-bold text-green-600 uppercase tracking-tight">{r.tid}</td>
-                                                            <td className="px-6 py-3 font-bold text-slate-700 uppercase tracking-tight">{r.name}</td>
-                                                            <td className="px-6 py-3 text-slate-400 font-bold uppercase tracking-tight">{r.kanwil_name}</td>
-                                                        </tr>
-                                                    ))
-                                                ) : (
-                                                    <tr><td colSpan="3" className="px-6 py-10 text-center text-slate-400 italic">Tidak ada data baru untuk diimport.</td></tr>
+                                            <tbody className="divide-y divide-slate-100/50 bg-white/40">
+                                                {importData.newRecords.map((r, i) => (
+                                                    <tr key={i} className="hover:bg-emerald-50/20">
+                                                        <td className="px-10 py-4 text-indigo-600 font-mono">{r.tid}</td>
+                                                        <td className="px-10 py-4 text-slate-600 truncate max-w-[250px]">{r.name}</td>
+                                                        <td className="px-10 py-4 text-center text-slate-400 font-black">{r.kanwil_name}</td>
+                                                        <td className="px-10 py-4 text-right opacity-40 italic">{r.tech_name}</td>
+                                                    </tr>
+                                                ))}
+                                                {importData.newRecords.length === 0 && (
+                                                    <tr><td colSpan="4" className="py-20 text-center text-slate-300 font-black tracking-widest italic opacity-50">No Clean Records to Display</td></tr>
                                                 )}
                                             </tbody>
                                         </table>
                                     </div>
                                 </div>
-                                
                                 {importData.duplicateRecords.length > 0 && (
-                                    <div className="p-6 bg-amber-50/50 rounded-[2rem] border border-dashed border-amber-200">
-                                        <p className="text-[10px] font-bold text-amber-600 uppercase tracking-[0.1em] text-center italic">
-                                            Catatan: {importData.duplicateRecords.length} TID sudah terdaftar di database dan akan diabaikan secara otomatis.
+                                    <div className="p-6 bg-rose-50/50 rounded-2xl border border-dashed border-rose-200 text-center">
+                                        <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest italic">
+                                            Notice: {importData.duplicateRecords.length} TIDs already exist and will be automatically filtered out.
                                         </p>
                                     </div>
                                 )}
                             </div>
-
-                            <div className="p-10 bg-slate-50 border-t border-slate-100 flex gap-4">
-                                <button 
-                                    onClick={() => setIsPreviewModalOpen(false)}
-                                    className="flex-1 px-8 py-5 bg-white border border-slate-200 text-slate-500 rounded-2xl font-black text-xs tracking-widest uppercase hover:bg-slate-100 transition-all active:scale-95"
-                                >
-                                    Batalkan Import
-                                </button>
-                                <button 
-                                    onClick={confirmImport}
-                                    disabled={isSaving || importData.newRecords.length === 0}
-                                    className="flex-[2] btn-dongker shadow-xl shadow-blue-200 py-5 text-xs tracking-[0.3em] active:scale-[0.98] transition-all disabled:opacity-50"
-                                >
-                                    {isSaving ? 'MEMPROSES...' : `KONFIRMASI IMPORT ${importData.newRecords.length} DATA`}
-                                </button>
+                            <div className="p-12 bg-slate-50/80 backdrop-blur-xl border-t border-slate-100 flex gap-8">
+                                <button onClick={() => setIsPreviewModalOpen(false)} className="flex-1 py-7 bg-white border border-slate-200 text-slate-400 rounded-3xl font-black text-[12px] tracking-[0.2em] uppercase hover:bg-slate-100 transition-all">Abort Batch</button>
+                                <button onClick={confirmImport} disabled={isSaving || importData.newRecords.length === 0} className="flex-[2] bg-indigo-600 text-white rounded-[3rem] font-black text-[12px] tracking-[0.4em] uppercase shadow-2xl shadow-indigo-200 disabled:opacity-50 hover:bg-indigo-700 transition-all">Commit {importData.newRecords.length} Assets</button>
                             </div>
                         </motion.div>
                     </div>
