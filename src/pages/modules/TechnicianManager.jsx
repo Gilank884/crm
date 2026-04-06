@@ -413,26 +413,26 @@ export default function TechnicianManager() {
                 </div>
             ) : (
                 /* Performance Yield Analysis View */
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[600px]">
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[600px]">
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left text-[10px] font-bold uppercase tracking-tight border-collapse">
-                            {/* High-Density Multi-layered Header */}
-                            <thead className="bg-[#1e293b] text-white/50">
+                        <table className="w-full text-left text-[9px] font-bold uppercase tracking-tight border-collapse">
+                            {/* High-Density Light Mode Header */}
+                            <thead className="bg-slate-100/80 text-slate-500 border-b border-slate-200">
                                 <tr>
-                                    <th rowSpan={2} className="px-6 py-6 bg-[#0f172a] text-white min-w-[240px] border-r border-white/5">PERSONNEL / PETUGAS</th>
-                                    <th rowSpan={2} className="px-6 py-6 bg-[#0f172a] text-white min-w-[140px] border-r border-white/5">KANWIL</th>
-                                    <th colSpan={2} className="px-4 py-3 bg-blue-500/10 text-blue-400 text-center border-r border-white/5 border-b border-white/5 tracking-[0.2em] font-black">PREVENTIVE (PM)</th>
-                                    <th colSpan={2} className="px-4 py-3 bg-amber-500/10 text-amber-400 text-center border-r border-white/5 border-b border-white/5 tracking-[0.2em] font-black">CORRECTIVE (CM)</th>
-                                    <th colSpan={2} className="px-4 py-3 bg-slate-700/30 text-slate-300 text-center border-r border-white/5 border-b border-white/5 tracking-[0.2em] font-black uppercase">JUMLAH</th>
-                                    <th rowSpan={2} className="px-10 py-6 bg-[#450a0a] text-rose-400 text-center tracking-[0.3em] font-black">OUT SLA %</th>
+                                    <th rowSpan={2} className="px-5 py-4 bg-slate-50 text-slate-900 min-w-[200px] border-r border-slate-200 font-black">PERSONNEL / PETUGAS</th>
+                                    <th rowSpan={2} className="px-5 py-4 bg-slate-50 text-slate-900 min-w-[120px] border-r border-slate-200 font-black">KANWIL</th>
+                                    <th colSpan={2} className="px-4 py-2 border-r border-slate-200 border-b border-slate-200 text-center text-blue-600 bg-blue-50/50 tracking-[0.1em] font-black">PREVENTIVE (PM)</th>
+                                    <th colSpan={2} className="px-4 py-2 border-r border-slate-200 border-b border-slate-200 text-center text-amber-600 bg-amber-50/50 tracking-[0.1em] font-black">CORRECTIVE (CM)</th>
+                                    <th colSpan={2} className="px-4 py-2 border-r border-slate-200 border-b border-slate-200 text-center text-slate-600 bg-slate-100/50 tracking-[0.1em] font-black uppercase">JUMLAH</th>
+                                    <th rowSpan={2} className="px-8 py-4 bg-rose-50 text-rose-600 text-center tracking-[0.15em] font-black">OUT SLA %</th>
                                 </tr>
-                                <tr className="bg-[#1e293b] border-b border-white/5 text-[9px]">
-                                    <th className="px-4 py-4 text-center border-r border-white/5 bg-blue-500/5">IN SLA</th>
-                                    <th className="px-4 py-4 text-center border-r border-white/5 bg-blue-500/5">OUT SLA</th>
-                                    <th className="px-4 py-4 text-center border-r border-white/5 bg-amber-500/5">IN SLA</th>
-                                    <th className="px-4 py-4 text-center border-r border-white/5 bg-amber-500/5">OUT SLA</th>
-                                    <th className="px-4 py-4 text-center border-r border-white/5 uppercase">IN SLA</th>
-                                    <th className="px-4 py-4 text-center border-r border-white/5 uppercase">OUT SLA</th>
+                                <tr className="bg-slate-50/50 border-b border-slate-200 text-[8px]">
+                                    <th className="px-4 py-3 text-center border-r border-slate-200 text-blue-500/70 font-black">IN SLA</th>
+                                    <th className="px-4 py-3 text-center border-r border-slate-200 text-rose-500/70 font-black">OUT SLA</th>
+                                    <th className="px-4 py-3 text-center border-r border-slate-200 text-amber-500/70 font-black">IN SLA</th>
+                                    <th className="px-4 py-3 text-center border-r border-slate-200 text-rose-500/70 font-black">OUT SLA</th>
+                                    <th className="px-4 py-3 text-center border-r border-slate-200 uppercase text-slate-500/70">IN SLA</th>
+                                    <th className="px-4 py-3 text-center border-r border-slate-200 uppercase text-rose-500/70">OUT SLA</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -457,24 +457,24 @@ export default function TechnicianManager() {
                                 ) : (
                                     performanceData.map(d => (
                                         <tr key={d.id} className="hover:bg-slate-50 transition-colors group">
-                                            <td className="px-6 py-4.5 border-r border-slate-100">
-                                                <div className="text-[12px] font-[950] text-slate-900 tracking-tight">{d.name}</div>
+                                            <td className="px-5 py-3 border-r border-slate-100">
+                                                <div className="text-[11px] font-black text-slate-900 tracking-tight">{d.name}</div>
                                             </td>
-                                            <td className="px-6 py-4.5 border-r border-slate-100">
-                                                <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200 tracking-wider inline-block">{d.kanwil}</span>
+                                            <td className="px-5 py-3 border-r border-slate-100">
+                                                <span className="text-[8px] font-black text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 tracking-wider inline-block">{d.kanwil}</span>
                                             </td>
-                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 border-blue-50 bg-blue-50/10 transition-colors group-hover:bg-blue-50/20 font-black text-[12px] tabular-nums text-blue-600">{d.pmMeet}</td>
-                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 font-bold text-[12px] tabular-nums text-rose-400">{d.pmMiss}</td>
-                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 border-amber-50 bg-amber-50/10 transition-colors group-hover:bg-amber-50/20 font-black text-[12px] tabular-nums text-amber-600">{d.cmMeet}</td>
-                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 font-bold text-[12px] tabular-nums text-rose-400">{d.cmMiss}</td>
-                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 bg-slate-50/50 font-[950] text-[13px] tabular-nums text-slate-800">{d.totalIn}</td>
-                                            <td className="px-4 py-4.5 text-center border-r border-slate-100 bg-slate-50/50 font-[950] text-[13px] tabular-nums text-rose-600">{d.totalOut}</td>
-                                            <td className={`px-10 py-4.5 text-center ${d.outPercent > 15 ? 'bg-rose-50/50' : d.outPercent > 5 ? 'bg-amber-50/50' : 'bg-emerald-50/50'} transition-colors`}>
+                                            <td className="px-4 py-3 text-center border-r border-slate-100 bg-blue-50/20 transition-colors group-hover:bg-blue-50/40 font-black text-[11px] tabular-nums text-blue-600">{d.pmMeet}</td>
+                                            <td className="px-4 py-3 text-center border-r border-slate-100 font-bold text-[11px] tabular-nums text-rose-400/80">{d.pmMiss}</td>
+                                            <td className="px-4 py-3 text-center border-r border-slate-100 bg-amber-50/20 transition-colors group-hover:bg-amber-50/40 font-black text-[11px] tabular-nums text-amber-600">{d.cmMeet}</td>
+                                            <td className="px-4 py-3 text-center border-r border-slate-100 font-bold text-[11px] tabular-nums text-rose-400/80">{d.cmMiss}</td>
+                                            <td className="px-4 py-3 text-center border-r border-slate-100 bg-slate-50/30 font-black text-[11px] tabular-nums text-slate-700">{d.totalIn}</td>
+                                            <td className="px-4 py-3 text-center border-r border-slate-100 bg-slate-50/30 font-black text-[11px] tabular-nums text-rose-600">{d.totalOut}</td>
+                                            <td className={`px-8 py-3 text-center ${d.outPercent > 15 ? 'bg-rose-50/30' : d.outPercent > 5 ? 'bg-amber-50/30' : 'bg-emerald-50/30'} transition-colors`}>
                                                 <div className="flex flex-col items-center">
-                                                    <span className={`text-[15px] font-[1000] tabular-nums leading-none ${d.outPercent > 15 ? 'text-rose-600' : d.outPercent > 5 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                                    <span className={`text-[12px] font-black tabular-nums leading-none ${d.outPercent > 15 ? 'text-rose-600' : d.outPercent > 5 ? 'text-amber-600' : 'text-emerald-600'}`}>
                                                         {d.outPercent}%
                                                     </span>
-                                                    <div className="w-12 h-1 bg-slate-200 rounded-full mt-2 overflow-hidden flex">
+                                                    <div className="w-10 h-1 bg-slate-200/50 rounded-full mt-1.5 overflow-hidden flex">
                                                         <div className={`h-full ${d.outPercent > 15 ? 'bg-rose-500' : d.outPercent > 5 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${100 - d.outPercent}%` }} />
                                                     </div>
                                                 </div>
