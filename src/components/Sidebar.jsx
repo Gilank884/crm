@@ -1,13 +1,14 @@
 import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { FiAirplay, FiGrid, FiUsers, FiBox, FiCalendar, FiLogOut } from 'react-icons/fi';
+import { FiAirplay, FiGrid, FiUsers, FiBox, FiCalendar, FiLogOut, FiTool } from 'react-icons/fi';
 
 const navItems = [
     { name: 'Dashboard', path: '/dashboard', icon: FiAirplay },
     { name: 'Monitor Kanwil', path: '/kanwil', icon: FiGrid },
     { name: 'Database Teknisi', path: '/technicians', icon: FiUsers },
     { name: 'Master Data', path: '/assets', icon: FiBox },
-    { name: 'Monthly PM & CM', path: '/maintenance', icon: FiCalendar },
+    { name: 'Monthly PM', path: '/maintenance/pm', icon: FiCalendar },
+    { name: 'Monthly CM', path: '/maintenance/cm', icon: FiTool },
 ];
 
 

@@ -32,6 +32,8 @@ export default function App() {
       <Route path="/kanwil" element={<ProtectedRoute><Layout>{() => <KanwilManager />}</Layout></ProtectedRoute>} />
       <Route path="/technicians" element={<ProtectedRoute><Layout>{() => <TechnicianManager />}</Layout></ProtectedRoute>} />
       <Route path="/assets" element={<ProtectedRoute><Layout>{() => <AssetInventory />}</Layout></ProtectedRoute>} />
+      <Route path="/maintenance/pm" element={<ProtectedRoute><Layout>{() => <MaintenanceTracker typeFilter="PM" />}</Layout></ProtectedRoute>} />
+      <Route path="/maintenance/cm" element={<ProtectedRoute><Layout>{() => <MaintenanceTracker typeFilter="CM" />}</Layout></ProtectedRoute>} />
       <Route path="/maintenance" element={<ProtectedRoute><Layout>{() => <MaintenanceTracker />}</Layout></ProtectedRoute>} />
 
       <Route path="*" element={<h1>404 Halaman Tidak Ditemukan</h1>} />

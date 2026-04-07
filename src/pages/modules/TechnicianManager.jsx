@@ -357,10 +357,10 @@ export default function TechnicianManager() {
                         <table className="w-full text-left text-[11px] uppercase tracking-tight">
                             <thead className="bg-slate-50/80 border-b border-slate-100 text-slate-400 font-black">
                                 <tr>
-                                    <th className="px-8 py-5">Personnel Identification</th>
-                                    <th className="px-8 py-5 text-center">Managed Assets</th>
-                                    <th className="px-8 py-5 text-center">Status</th>
-                                    <th className="px-8 py-5 text-right">Actions</th>
+                                    <th className="px-4 py-3">Personnel Identification</th>
+                                    <th className="px-4 py-3 text-center">Managed Assets</th>
+                                    <th className="px-4 py-3 text-center">Status</th>
+                                    <th className="px-4 py-3 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 bg-white">
@@ -371,7 +371,7 @@ export default function TechnicianManager() {
                                 ) : (
                                     filteredTechnicians.map((tech) => (
                                         <tr key={tech.id} className="hover:bg-slate-50 transition-colors group">
-                                            <td className="px-8 py-5">
+                                            <td className="px-4 py-2">
                                                 <div className="flex items-center gap-4">
                                                     <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 text-lg border border-slate-200 transition-transform group-hover:scale-105 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-all">
                                                         <FiUsers size={16} />
@@ -385,17 +385,17 @@ export default function TechnicianManager() {
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="px-8 py-5 text-center">
-                                                <button onClick={() => navigate(`/assets?pic_id=${tech.id}`)} className="flex items-center justify-center gap-1.5 mx-auto bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all text-[9px] font-black shadow-sm group/btn">
+                                            <td className="px-4 py-2 text-center">
+                                                <button onClick={() => navigate(`/assets?pic_id=${tech.id}`)} className="flex items-center justify-center gap-1.5 mx-auto bg-slate-50 px-3 py-1 rounded-lg border border-slate-200 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all text-[9px] font-black shadow-sm group/btn">
                                                     <FiBox size={12} /> {tech.managed_assets?.[0]?.count || 0} Assets
                                                 </button>
                                             </td>
-                                            <td className="px-8 py-5 text-center">
-                                                <div className={`mx-auto flex items-center justify-center gap-2 px-3 py-1.5 rounded-full border w-fit text-[8px] font-black tracking-widest ${tech.status === 'active' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-300 border-slate-200'}`}>
+                                            <td className="px-4 py-2 text-center">
+                                                <div className={`mx-auto flex items-center justify-center gap-2 px-3 py-1 rounded-full border w-fit text-[8px] font-black tracking-widest ${tech.status === 'active' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-300 border-slate-200'}`}>
                                                     <FiShield size={10} /> {tech.status.toUpperCase()}
                                                 </div>
                                             </td>
-                                            <td className="px-8 py-5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <td className="px-4 py-2 text-right opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <div className="flex justify-end gap-2">
                                                     <button className="p-2.5 bg-white hover:bg-indigo-50 rounded-lg transition-all border border-slate-200 text-slate-400 hover:text-indigo-600 shadow-sm"><FiEdit3 size={14} /></button>
                                                     <button className="p-2.5 bg-white hover:bg-rose-50 rounded-lg transition-all border border-slate-200 text-slate-400 hover:text-rose-500 shadow-sm"><FiTrash2 size={14} /></button>
@@ -419,20 +419,20 @@ export default function TechnicianManager() {
                             {/* High-Density Light Mode Header */}
                             <thead className="bg-slate-100/80 text-slate-500 border-b border-slate-200">
                                 <tr>
-                                    <th rowSpan={2} className="px-5 py-4 bg-slate-50 text-slate-900 min-w-[200px] border-r border-slate-200 font-black">PERSONNEL / PETUGAS</th>
-                                    <th rowSpan={2} className="px-5 py-4 bg-slate-50 text-slate-900 min-w-[120px] border-r border-slate-200 font-black">KANWIL</th>
-                                    <th colSpan={2} className="px-4 py-2 border-r border-slate-200 border-b border-slate-200 text-center text-blue-600 bg-blue-50/50 tracking-[0.1em] font-black">PREVENTIVE (PM)</th>
-                                    <th colSpan={2} className="px-4 py-2 border-r border-slate-200 border-b border-slate-200 text-center text-amber-600 bg-amber-50/50 tracking-[0.1em] font-black">CORRECTIVE (CM)</th>
-                                    <th colSpan={2} className="px-4 py-2 border-r border-slate-200 border-b border-slate-200 text-center text-slate-600 bg-slate-100/50 tracking-[0.1em] font-black uppercase">JUMLAH</th>
-                                    <th rowSpan={2} className="px-8 py-4 bg-rose-50 text-rose-600 text-center tracking-[0.15em] font-black">OUT SLA %</th>
+                                    <th rowSpan={2} className="px-4 py-3 bg-slate-50 text-slate-900 min-w-[200px] border-r border-slate-200 font-black">PERSONNEL / PETUGAS</th>
+                                    <th rowSpan={2} className="px-4 py-3 bg-slate-50 text-slate-900 min-w-[120px] border-r border-slate-200 font-black">KANWIL</th>
+                                    <th colSpan={2} className="px-3 py-1.5 border-r border-slate-200 border-b border-slate-200 text-center text-blue-600 bg-blue-50/50 tracking-[0.1em] font-black">PREVENTIVE (PM)</th>
+                                    <th colSpan={2} className="px-3 py-1.5 border-r border-slate-200 border-b border-slate-200 text-center text-amber-600 bg-amber-50/50 tracking-[0.1em] font-black">CORRECTIVE (CM)</th>
+                                    <th colSpan={2} className="px-3 py-1.5 border-r border-slate-200 border-b border-slate-200 text-center text-slate-600 bg-slate-100/50 tracking-[0.1em] font-black uppercase">JUMLAH</th>
+                                    <th rowSpan={2} className="px-4 py-3 bg-rose-50 text-rose-600 text-center tracking-[0.15em] font-black">OUT SLA %</th>
                                 </tr>
                                 <tr className="bg-slate-50/50 border-b border-slate-200 text-[8px]">
-                                    <th className="px-4 py-3 text-center border-r border-slate-200 text-blue-500/70 font-black">IN SLA</th>
-                                    <th className="px-4 py-3 text-center border-r border-slate-200 text-rose-500/70 font-black">OUT SLA</th>
-                                    <th className="px-4 py-3 text-center border-r border-slate-200 text-amber-500/70 font-black">IN SLA</th>
-                                    <th className="px-4 py-3 text-center border-r border-slate-200 text-rose-500/70 font-black">OUT SLA</th>
-                                    <th className="px-4 py-3 text-center border-r border-slate-200 uppercase text-slate-500/70">IN SLA</th>
-                                    <th className="px-4 py-3 text-center border-r border-slate-200 uppercase text-rose-500/70">OUT SLA</th>
+                                    <th className="px-3 py-2 text-center border-r border-slate-200 text-blue-500/70 font-black">IN SLA</th>
+                                    <th className="px-3 py-2 text-center border-r border-slate-200 text-rose-500/70 font-black">OUT SLA</th>
+                                    <th className="px-3 py-2 text-center border-r border-slate-200 text-amber-500/70 font-black">IN SLA</th>
+                                    <th className="px-3 py-2 text-center border-r border-slate-200 text-rose-500/70 font-black">OUT SLA</th>
+                                    <th className="px-3 py-2 text-center border-r border-slate-200 uppercase text-slate-500/70">IN SLA</th>
+                                    <th className="px-3 py-2 text-center border-r border-slate-200 uppercase text-rose-500/70">OUT SLA</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -457,19 +457,19 @@ export default function TechnicianManager() {
                                 ) : (
                                     performanceData.map(d => (
                                         <tr key={d.id} className="hover:bg-slate-50 transition-colors group">
-                                            <td className="px-5 py-3 border-r border-slate-100">
+                                            <td className="px-3 py-1.5 border-r border-slate-100">
                                                 <div className="text-[11px] font-black text-slate-900 tracking-tight">{d.name}</div>
                                             </td>
-                                            <td className="px-5 py-3 border-r border-slate-100">
+                                            <td className="px-3 py-1.5 border-r border-slate-100">
                                                 <span className="text-[8px] font-black text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 tracking-wider inline-block">{d.kanwil}</span>
                                             </td>
-                                            <td className="px-4 py-3 text-center border-r border-slate-100 bg-blue-50/20 transition-colors group-hover:bg-blue-50/40 font-black text-[11px] tabular-nums text-blue-600">{d.pmMeet}</td>
-                                            <td className="px-4 py-3 text-center border-r border-slate-100 font-bold text-[11px] tabular-nums text-rose-400/80">{d.pmMiss}</td>
-                                            <td className="px-4 py-3 text-center border-r border-slate-100 bg-amber-50/20 transition-colors group-hover:bg-amber-50/40 font-black text-[11px] tabular-nums text-amber-600">{d.cmMeet}</td>
-                                            <td className="px-4 py-3 text-center border-r border-slate-100 font-bold text-[11px] tabular-nums text-rose-400/80">{d.cmMiss}</td>
-                                            <td className="px-4 py-3 text-center border-r border-slate-100 bg-slate-50/30 font-black text-[11px] tabular-nums text-slate-700">{d.totalIn}</td>
-                                            <td className="px-4 py-3 text-center border-r border-slate-100 bg-slate-50/30 font-black text-[11px] tabular-nums text-rose-600">{d.totalOut}</td>
-                                            <td className={`px-8 py-3 text-center ${d.outPercent > 15 ? 'bg-rose-50/30' : d.outPercent > 5 ? 'bg-amber-50/30' : 'bg-emerald-50/30'} transition-colors`}>
+                                            <td className="px-3 py-1.5 text-center border-r border-slate-100 bg-blue-50/20 transition-colors group-hover:bg-blue-50/40 font-black text-[11px] tabular-nums text-blue-600">{d.pmMeet}</td>
+                                            <td className="px-3 py-1.5 text-center border-r border-slate-100 font-bold text-[11px] tabular-nums text-rose-400/80">{d.pmMiss}</td>
+                                            <td className="px-3 py-1.5 text-center border-r border-slate-100 bg-amber-50/20 transition-colors group-hover:bg-amber-50/40 font-black text-[11px] tabular-nums text-amber-600">{d.cmMeet}</td>
+                                            <td className="px-3 py-1.5 text-center border-r border-slate-100 font-bold text-[11px] tabular-nums text-rose-400/80">{d.cmMiss}</td>
+                                            <td className="px-3 py-1.5 text-center border-r border-slate-100 bg-slate-50/30 font-black text-[11px] tabular-nums text-slate-700">{d.totalIn}</td>
+                                            <td className="px-3 py-1.5 text-center border-r border-slate-100 bg-slate-50/30 font-black text-[11px] tabular-nums text-rose-600">{d.totalOut}</td>
+                                            <td className={`px-4 py-1.5 text-center ${d.outPercent > 15 ? 'bg-rose-50/30' : d.outPercent > 5 ? 'bg-amber-50/30' : 'bg-emerald-50/30'} transition-colors`}>
                                                 <div className="flex flex-col items-center">
                                                     <span className={`text-[12px] font-black tabular-nums leading-none ${d.outPercent > 15 ? 'text-rose-600' : d.outPercent > 5 ? 'text-amber-600' : 'text-emerald-600'}`}>
                                                         {d.outPercent}%
