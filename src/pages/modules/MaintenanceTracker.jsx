@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { FiCalendar, FiUpload, FiPlus, FiTool, FiCheckCircle, FiClock, FiFileText, FiMapPin, FiUser, FiInfo, FiActivity, FiAlertCircle, FiDownload, FiSearch, FiFilter, FiChevronRight, FiDatabase, FiBarChart2, FiList } from 'react-icons/fi';
+import { FiCalendar, FiUpload, FiPlus, FiTool, FiCheckCircle, FiClock, FiFileText, FiMapPin, FiUser, FiInfo, FiActivity, FiAlertCircle, FiDownload, FiSearch, FiFilter, FiChevronRight, FiDatabase, FiBarChart2, FiList, FiEdit3, FiChevronUp, FiChevronDown, FiMinus } from 'react-icons/fi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile, exportToExcel } from '../../utils/excelHandler';
@@ -95,6 +95,10 @@ export default function MaintenanceTracker({ typeFilter }) {
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [devMode, setDevMode] = useState(false);
+    const [modifiedTaskIds, setModifiedTaskIds] = useState(new Set());
+    const [sortConfig, setSortConfig] = useState({ key: 'scheduled_date', direction: 'desc' });
+    const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, key: null });
     const [assets, setAssets] = useState([]);
     const [technicians, setTechnicians] = useState([]);
     const [rowLimit, setRowLimit] = useState(100);
@@ -103,14 +107,23 @@ export default function MaintenanceTracker({ typeFilter }) {
         technician_id: '', 
         type: typeFilter || 'PM', 
         period: '', 
-        scheduled_date: '', 
-        completed_date: '', 
-        notes: '', 
+        target_date: '',
+        reason: '',
         status: 'pending' 
     });
 
     const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
     const [importData, setImportData] = useState({ newRecords: [], updateRecords: [], skipCount: 0, openCount: 0, closedCount: 0 });
+
+    const formatDate = (iso) => {
+        if (!iso) return '---';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return iso; // Fallback if invalid
+        const day = d.getDate().toString().padStart(2, '0');
+        const month = (d.getMonth() + 1).toString().padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}/${month}/${year}`;
+    };
 
     const getPerformanceStatus = (task) => {
         if (!task.scheduled_date) return 'PENDING';
@@ -139,17 +152,42 @@ export default function MaintenanceTracker({ typeFilter }) {
     }, []);
 
     const fetchInitialData = async () => {
-        // Parallel fetch — all 3 lookups happen at once
-        const [assetRes, techRes, kwRes] = await Promise.all([
+        setLoading(true);
+        // Parallel fetch — all 4 primary requests happen at once
+        const start = getFirstDay(startMonth);
+        const end = getLastDay(endMonth);
+
+        const taskQuery = supabase
+            .from('maintenance_tasks')
+            .select(`
+                id, asset_id, technician_id, type, scheduled_date, target_date, completed_date, reason,
+                managed_assets!inner ( name, tid, kanwils ( name, id ) ),
+                technicians ( name, id )
+            `)
+            .gte('scheduled_date', start)
+            .lte('scheduled_date', end)
+            .order('scheduled_date', { ascending: true })
+            .limit(rowLimit === 'all' ? 10000 : rowLimit);
+
+        if (typeFilter) taskQuery.eq('type', typeFilter);
+
+        const [assetRes, techRes, kwRes, taskRes] = await Promise.all([
             supabase.from('managed_assets').select('id, name, tid').order('name'),
             supabase.from('technicians').select('id, name, kanwil_id').order('name'),
-            supabase.from('kanwils').select('id, name').order('name')
+            supabase.from('kanwils').select('id, name').order('name'),
+            taskQuery
         ]);
 
         setAssets(assetRes.data || []);
         setTechnicians(techRes.data || []);
         setKanwils(kwRes.data || []);
-        fetchTasks(startMonth, endMonth, filterKanwil, filterTechnician, rowLimit);
+        
+        let filtered = taskRes.data || [];
+        if (filterKanwil !== 'all') {
+            filtered = filtered.filter(t => t.managed_assets?.kanwils?.id === filterKanwil);
+        }
+        setTasks(filtered);
+        setLoading(false);
     };
 
     const fetchTasks = async (startM = startMonth, endM = endMonth, kanwilId = filterKanwil, techId = filterTechnician, limitVal = rowLimit) => {
@@ -166,7 +204,9 @@ export default function MaintenanceTracker({ typeFilter }) {
                 technician_id,
                 type,
                 scheduled_date,
+                target_date,
                 completed_date,
+                reason,
                 managed_assets!inner ( 
                     name, 
                     tid, 
@@ -206,6 +246,57 @@ export default function MaintenanceTracker({ typeFilter }) {
         setLoading(false);
     };
 
+    const updateTaskField = async (taskId, field, value) => {
+        const { error } = await supabase
+            .from('maintenance_tasks')
+            .update({ [field]: value === '' ? null : value })
+            .eq('id', taskId);
+           if (error) {
+            console.error("Update failed:", error);
+            alert(`Gagal update database: ${error.message}`);
+        } else {
+            // Update local state to reflect change immediately
+            setTasks(prev => prev.map(t => t.id === taskId ? { ...t, [field]: value } : t));
+            setModifiedTaskIds(prev => new Set(prev).add(taskId));
+        }
+    };
+
+    const requestSort = (key, direction = null) => {
+        if (!direction) {
+            direction = (sortConfig.key === key && sortConfig.direction === 'asc') ? 'desc' : 'asc';
+        }
+        if (direction === 'clear') {
+            setSortConfig({ key: null, direction: 'asc' });
+        } else {
+            setSortConfig({ key, direction });
+        }
+        setContextMenu({ ...contextMenu, visible: false });
+    };
+
+    const handleContextMenu = (e, key) => {
+        e.preventDefault();
+        setContextMenu({
+            visible: true,
+            x: e.clientX,
+            y: e.clientY,
+            key: key
+        });
+    };
+
+    useEffect(() => {
+        const handleClick = () => setContextMenu({ ...contextMenu, visible: false });
+        window.addEventListener('click', handleClick);
+        return () => window.removeEventListener('click', handleClick);
+    }, [contextMenu]);
+
+    const updateTaskTarget = async (taskId, date) => {
+        updateTaskField(taskId, 'target_date', date);
+    };
+
+    const updateTaskReason = async (taskId, reason) => {
+        updateTaskField(taskId, 'reason', reason);
+    };
+
     // Debounced search — avoids re-filtering on every keystroke
     const [debouncedSearch, setDebouncedSearch] = useState('');
     useEffect(() => {
@@ -219,7 +310,7 @@ export default function MaintenanceTracker({ typeFilter }) {
     const { filteredTasks, meetCount, missCount, pendingCount, chartData } = useMemo(() => {
         // Step 1: Search filter
         const search = debouncedSearch.toLowerCase();
-        const filtered = search
+        let filtered = search
             ? tasks.filter(t =>
                 t.managed_assets?.name?.toLowerCase().includes(search) ||
                 t.managed_assets?.tid?.toString().toLowerCase().includes(search) ||
@@ -227,7 +318,28 @@ export default function MaintenanceTracker({ typeFilter }) {
             )
             : tasks;
 
-        // Step 2: Single pass over filtered tasks for stats + chart
+        // Step 2: Sorting
+        if (sortConfig.key) {
+            filtered = [...filtered].sort((a, b) => {
+                let aVal, bVal;
+
+                // Handle nested keys or calculated keys
+                switch (sortConfig.key) {
+                    case 'tid': aVal = a.managed_assets?.tid; bVal = b.managed_assets?.tid; break;
+                    case 'site': aVal = a.managed_assets?.name; bVal = b.managed_assets?.name; break;
+                    case 'kanwil': aVal = a.managed_assets?.kanwils?.name; bVal = b.managed_assets?.kanwils?.name; break;
+                    case 'tech': aVal = a.technicians?.name; bVal = b.technicians?.name; break;
+                    case 'status': aVal = getPerformanceStatus(a); bVal = getPerformanceStatus(b); break;
+                    default: aVal = a[sortConfig.key]; bVal = b[sortConfig.key];
+                }
+
+                if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+
+        // Step 3: Single pass over filtered tasks for stats + chart
         let meet = 0, miss = 0, pending = 0;
         const monthMap = {};
 
@@ -340,6 +452,11 @@ export default function MaintenanceTracker({ typeFilter }) {
                 const rawStatus = item['STATUS'] || item['KUNJUNGAN'] || item['TANGGAL KUNJUNGAN'] || item['VISIT DATE'] || item['DATE'] || item['TANGGAL'];
                 const visitDate = getIsoDate(rawStatus);
 
+                const rawTarget = item['TARGET'] || item['TARGET DATE'] || item['TARGET KUNJUNGAN'];
+                const targetDate = rawTarget ? getIsoDate(rawTarget) : null;
+
+                const reason = item['REASON'] || item['ALASAN'] || item['KETERANGAN SLA'] || '';
+
                 const assetId = assetMap[tid];
 
                 // ═══ VALIDATION (Now with Auto-Provisioning, assetId should exist) ═══
@@ -378,6 +495,8 @@ export default function MaintenanceTracker({ typeFilter }) {
                     completed_date: visitDate,
                     period: taskPeriod,
                     status: visitDate ? 'completed' : 'pending',
+                    target_date: targetDate,
+                    reason: reason,
                     notes: `Imported: ${pelaksana || 'Unknown'}`,
                     tid_preview: tid,
                     site_preview: siteName,
@@ -445,6 +564,8 @@ export default function MaintenanceTracker({ typeFilter }) {
         setIsSaving(false);
     };
 
+
+
     const handleAddTask = async (e) => {
         e.preventDefault(); setIsSaving(true);
 
@@ -454,8 +575,10 @@ export default function MaintenanceTracker({ typeFilter }) {
             type: newTask.type,
             period: newTask.scheduled_date ? newTask.scheduled_date.slice(0, 7) : new Date().toISOString().slice(0, 7),
             scheduled_date: newTask.scheduled_date,
+            target_date: newTask.target_date || null,
             completed_date: newTask.completed_date || null,
             status: newTask.completed_date ? 'completed' : 'pending',
+            reason: newTask.reason || '',
             notes: newTask.notes || ''
         };
 
@@ -491,30 +614,23 @@ export default function MaintenanceTracker({ typeFilter }) {
                     </div>
 
                     {/* Stats Chips */}
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-3 border-l-[3px] border-emerald-400 bg-emerald-50/60 pl-3 pr-4 py-2 rounded-r-lg">
-                            <div>
-                                <div className="text-[8px] font-bold text-emerald-600/60 uppercase tracking-wider">Meet SLA</div>
-                                <div className="text-xl font-[950] text-emerald-600 leading-none tabular-nums mt-0.5">{meetCount}</div>
-                            </div>
+                    {/* Stats Dashboard */}
+                    <div className="flex items-center gap-4">
+                        <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl px-6 py-3 flex flex-col items-center min-w-[120px] shadow-sm">
+                            <span className="text-[9px] font-black text-emerald-600 uppercase tracking-[0.15em] mb-1">IN SLA</span>
+                            <span className="text-2xl font-[950] text-emerald-700 leading-none tabular-nums">{meetCount}</span>
                         </div>
-                        <div className="flex items-center gap-3 border-l-[3px] border-rose-400 bg-rose-50/60 pl-3 pr-4 py-2 rounded-r-lg">
-                            <div>
-                                <div className="text-[8px] font-bold text-rose-600/60 uppercase tracking-wider">Miss SLA</div>
-                                <div className="text-xl font-[950] text-rose-600 leading-none tabular-nums mt-0.5">{missCount}</div>
-                            </div>
+                        <div className="bg-rose-50/50 border border-rose-100 rounded-2xl px-6 py-3 flex flex-col items-center min-w-[120px] shadow-sm">
+                            <span className="text-[9px] font-black text-rose-600 uppercase tracking-[0.15em] mb-1">OUT SLA</span>
+                            <span className="text-2xl font-[950] text-rose-700 leading-none tabular-nums">{missCount}</span>
                         </div>
-                        <div className="flex items-center gap-3 border-l-[3px] border-lime-500 bg-lime-50/60 pl-3 pr-4 py-2 rounded-r-lg">
-                            <div>
-                                <div className="text-[8px] font-bold text-lime-600/60 uppercase tracking-wider">In Progress</div>
-                                <div className="text-xl font-[950] text-lime-600 leading-none tabular-nums mt-0.5">{pendingCount}</div>
-                            </div>
+                        <div className="bg-amber-50/50 border border-amber-100 rounded-2xl px-6 py-3 flex flex-col items-center min-w-[120px] shadow-sm">
+                            <span className="text-[9px] font-black text-amber-600 uppercase tracking-[0.15em] mb-1">IN PROGRESS</span>
+                            <span className="text-2xl font-[950] text-amber-700 leading-none tabular-nums">{pendingCount}</span>
                         </div>
-                        <div className="flex items-center gap-3 border-l-[3px] border-slate-300 bg-slate-50 pl-3 pr-4 py-2 rounded-r-lg">
-                            <div>
-                                <div className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Total</div>
-                                <div className="text-xl font-[950] text-slate-700 leading-none tabular-nums mt-0.5">{tasks.length}</div>
-                            </div>
+                        <div className="bg-slate-50 border border-slate-200 rounded-2xl px-6 py-3 flex flex-col items-center min-w-[120px] shadow-sm">
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.15em] mb-1">TOTAL DATA</span>
+                            <span className="text-2xl font-[950] text-slate-900 leading-none tabular-nums">{tasks.length}</span>
                         </div>
                     </div>
 
@@ -524,6 +640,23 @@ export default function MaintenanceTracker({ typeFilter }) {
                             <FiSearch size={13} className="text-slate-300" />
                             <input type="text" placeholder="Cari TID, Site, Teknisi..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-transparent border-none outline-none text-[10px] font-bold text-slate-700 w-40 ml-2 placeholder:text-slate-300" />
                         </div>
+                        <div className="w-px h-6 bg-slate-200" />
+                        <button 
+                            onClick={() => {
+                                if (devMode) {
+                                    if (window.confirm("Kamu yakin akan mengubah seluruh data?")) {
+                                        setDevMode(false);
+                                        setModifiedTaskIds(new Set());
+                                    }
+                                } else {
+                                    setDevMode(true);
+                                }
+                            }} 
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-black text-[9px] tracking-wider uppercase transition-all shadow-sm ${devMode ? 'bg-amber-100 text-amber-600 border border-amber-200 ring-2 ring-amber-50' : 'bg-slate-50 text-slate-400 border border-slate-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200'}`}
+                            title="Toggle Developer & Maintenance Mode"
+                        >
+                            <FiEdit3 size={13} /> {devMode ? 'Exit Dev' : 'Dev Mode'}
+                        </button>
                         <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-black text-[9px] tracking-wider uppercase transition-all shadow-sm shadow-blue-100 active:scale-95">
                             <FiPlus size={13} /> Jadwal
                         </button>
@@ -532,17 +665,30 @@ export default function MaintenanceTracker({ typeFilter }) {
                         </button>
                         <button
                             onClick={async () => {
-                                const exportData = filteredTasks.map(t => ({
-                                    'TID': t.managed_assets?.tid || 'N/A',
-                                    'Site Name': t.managed_assets?.name || 'Unknown',
-                                    'Type': t.type,
-                                    'Region': t.managed_assets?.kanwils?.name || 'Induk',
-                                    'Engineer': t.technicians?.name || 'Unassigned',
-                                    'Scheduled Date': t.scheduled_date,
-                                    'Completed Date': t.completed_date || 'PENDING',
-                                    'SLA Status': getPerformanceStatus(t)
-                                }));
-                                await exportToExcel(exportData, `Maintenance_SLA_${new Date().toISOString().slice(0, 10)}.xlsx`);
+                                const exportData = filteredTasks.map(t => {
+                                    // Calculate Aging for Excel
+                                    let aging = '---';
+                                    if (t.scheduled_date && t.target_date) {
+                                        const s = new Date(t.scheduled_date);
+                                        const target = new Date(t.target_date);
+                                        aging = Math.floor((target - s) / (1000 * 60 * 60 * 24));
+                                    }
+
+                                    return {
+                                        'TID': t.managed_assets?.tid || 'N/A',
+                                        'LOKASI': t.managed_assets?.name || 'Unknown',
+                                        'TYPE': t.type,
+                                        'WILAYAH': t.managed_assets?.kanwils?.name || 'Induk',
+                                        'TGL JADWAL': formatDate(t.scheduled_date),
+                                        'TGL TARGET': formatDate(t.target_date),
+                                        'AGING (HARI)': aging,
+                                        'TEKNISI': t.technicians?.name || 'Unassigned',
+                                        'SLA STATUS': getPerformanceStatus(t),
+                                        'TGL KUNJUNGAN': formatDate(t.completed_date),
+                                        'REASON': t.reason || (getPerformanceStatus(t) === 'MEET' ? 'DONE' : '-')
+                                    };
+                                });
+                                await exportToExcel(exportData, `Maintenance_Log_${new Date().toISOString().slice(0, 10)}.xlsx`);
                             }}
                             className="p-2 bg-slate-50 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-lg border border-slate-200 hover:border-emerald-200 transition-all"
                             title="Export Premium Excel"
@@ -604,16 +750,35 @@ export default function MaintenanceTracker({ typeFilter }) {
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse table-fixed">
                             <thead className="bg-slate-100/50 text-slate-400 border-b border-slate-200">
-                                <tr className="text-[9px] font-black tracking-widest uppercase align-middle">
+                                <tr className="text-[9px] font-black tracking-widest uppercase align-middle cursor-pointer">
                                     <th className="px-3 py-3 border-r border-slate-200 text-center w-12 bg-slate-200/20">#</th>
-                                    <th className="px-3 py-3 border-r border-slate-200 w-24">TID</th>
-                                    <th className="px-3 py-3 border-r border-slate-200 w-56">SITE INFORMATION</th>
-                                    <th className="px-3 py-3 border-r border-slate-200 text-center w-24">CATEGORY</th>
-                                    <th className="px-3 py-3 border-r border-slate-200 w-32">REGION</th>
-                                    <th className="px-3 py-3 border-r border-slate-200 text-center w-28">SCHEDULED</th>
-                                    <th className="px-3 py-3 border-r border-slate-200 text-center w-28">KUNJUNGAN</th>
-                                    <th className="px-4 py-3 border-r border-slate-200 w-44">TECHNICIAN</th>
-                                    <th className="px-3 py-3 text-center w-24 font-black">SLA STATUS</th>
+                                    {[
+                                        { label: 'TID', key: 'tid', w: 'w-24' },
+                                        { label: 'SITE INFORMATION', key: 'site', w: 'w-56' },
+                                        { label: 'CATEGORY', key: 'type', w: 'w-24 text-center' },
+                                        { label: 'REGION', key: 'kanwil', w: 'w-32' },
+                                        { label: 'SCHEDULED', key: 'scheduled_date', w: 'w-28 text-center' },
+                                        { label: 'TARGET', key: 'target_date', w: 'w-28 text-center' },
+                                        { label: 'AGING', key: 'aging', w: 'w-20 text-center' },
+                                        { label: 'TECHNICIAN', key: 'tech', w: 'w-44' },
+                                        { label: 'SLA STATUS', key: 'status', w: 'w-24 text-center' },
+                                        { label: 'KUNJUNGAN', key: 'completed_date', w: 'w-28 text-center' },
+                                        { label: 'REASON', key: 'reason', w: 'w-40 text-center' }
+                                    ].map(col => (
+                                        <th 
+                                            key={col.key}
+                                            onClick={() => requestSort(col.key)}
+                                            onContextMenu={(e) => handleContextMenu(e, col.key)}
+                                            className={`px-3 py-3 border-r border-slate-200 ${col.w} hover:bg-slate-200/50 transition-colors relative group select-none`}
+                                        >
+                                            <div className="flex items-center justify-between gap-1">
+                                                <span>{col.label}</span>
+                                                {sortConfig.key === col.key ? (
+                                                    sortConfig.direction === 'asc' ? <FiChevronUp className="text-blue-500" /> : <FiChevronDown className="text-blue-500" />
+                                                ) : <FiChevronDown className="text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                                            </div>
+                                        </th>
+                                    ))}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200">
@@ -627,27 +792,83 @@ export default function MaintenanceTracker({ typeFilter }) {
                                         return (
                                             <tr key={task.id} className={`text-[10px] uppercase font-bold hover:bg-slate-50 transition-colors ${perf === 'MISS' ? 'bg-rose-50/20' : perf === 'MEET' ? 'bg-emerald-50/10' : ''}`}>
                                                 <td className="px-3 py-2 border-r border-slate-100 text-center bg-slate-100/10 text-slate-300 font-mono text-[9px]">{idx + 1}</td>
-                                                <td className="px-3 py-2 border-r border-slate-100 font-mono text-blue-500 bg-blue-50/10 text-[9px]">{task.managed_assets?.tid || '---'}</td>
-                                                <td className="px-3 py-2 border-r border-slate-100 truncate pr-4 text-slate-800 tracking-tight">{task.managed_assets?.name}</td>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-center">
-                                                    <span className={`px-2 py-0.5 rounded text-[8px] font-black border ${task.type === 'PM' ? 'bg-indigo-50 text-indigo-500 border-indigo-100' : 'bg-rose-50 text-rose-500 border-rose-100'}`}>{task.type}</span>
-                                                </td>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-slate-400 text-[9px]">{task.managed_assets?.kanwils?.name || '---'}</td>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-center font-mono text-slate-500">{task.scheduled_date}</td>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-center font-mono">
-                                                    {task.completed_date ? (
-                                                        <span className="text-slate-700">{task.completed_date}</span>
+                                                <td className="px-3 py-2 border-r border-slate-100 font-mono text-blue-500 bg-blue-50/10 text-[9px]">
+                                                    {devMode ? (
+                                                        <select 
+                                                            value={task.asset_id || ''} 
+                                                            onChange={(e) => updateTaskField(task.id, 'asset_id', e.target.value)}
+                                                            className={`bg-white border rounded px-1 py-0.5 text-[8px] font-black outline-none w-full ${modifiedTaskIds.has(task.id) ? 'text-emerald-500 border-emerald-200' : 'border-slate-200'}`}
+                                                        >
+                                                            <option value="">SELECT TID...</option>
+                                                            {assets.map(a => <option key={a.id} value={a.id}>{a.tid}</option>)}
+                                                        </select>
                                                     ) : (
-                                                        <span className="text-slate-200 italic text-[8px]">WAITING</span>
+                                                        task.managed_assets?.tid || '---'
                                                     )}
                                                 </td>
-                                                <td className="px-4 py-2 border-r border-slate-100 pr-4">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-5 h-5 bg-slate-100 rounded-md border border-slate-200 flex items-center justify-center text-slate-400 text-[8px] font-black">{task.technicians?.name?.[0]}</div>
-                                                        <span className="truncate text-slate-600">{task.technicians?.name || 'UNASSIGNED'}</span>
-                                                    </div>
+                                                <td className="px-3 py-2 border-r border-slate-100 truncate pr-4 text-slate-800 tracking-tight">{task.managed_assets?.name}</td>
+                                                <td className="px-3 py-2 border-r border-slate-100 text-center">
+                                                    {devMode ? (
+                                                        <select 
+                                                            value={task.type} 
+                                                            onChange={(e) => updateTaskField(task.id, 'type', e.target.value)}
+                                                            className={`bg-white border rounded px-1 py-0.5 text-[8px] font-black outline-none ${modifiedTaskIds.has(task.id) ? 'text-emerald-500 border-emerald-200' : 'border-slate-200'}`}
+                                                        >
+                                                            <option value="PM">PM</option>
+                                                            <option value="CM">CM</option>
+                                                        </select>
+                                                    ) : (
+                                                        <span className={`px-2 py-0.5 rounded text-[8px] font-black border ${task.type === 'PM' ? 'bg-indigo-50 text-indigo-500 border-indigo-100' : 'bg-rose-50 text-rose-500 border-rose-100'}`}>{task.type}</span>
+                                                    )}
                                                 </td>
-                                                <td className="px-3 py-2 text-center align-middle">
+                                                <td className="px-3 py-2 border-r border-slate-100 text-slate-400 text-[9px]">{task.managed_assets?.kanwils?.name || '---'}</td>
+                                                <td className="px-3 py-2 border-r border-slate-100 text-center font-mono text-slate-500">
+                                                    {devMode ? (
+                                                        <input 
+                                                            type="date" 
+                                                            defaultValue={task.scheduled_date} 
+                                                            onBlur={(e) => updateTaskField(task.id, 'scheduled_date', e.target.value)}
+                                                            className={`bg-transparent border-none focus:bg-white focus:ring-1 focus:ring-blue-100 rounded px-1 py-1 text-[9px] font-mono outline-none w-full ${modifiedTaskIds.has(task.id) ? 'text-emerald-500 font-bold' : 'text-slate-600'}`}
+                                                        />
+                                                    ) : (
+                                                        formatDate(task.scheduled_date)
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2 border-r border-slate-100 text-center">
+                                                    <input 
+                                                        type="date"
+                                                        defaultValue={task.target_date || ''}
+                                                        onBlur={(e) => updateTaskTarget(task.id, e.target.value)}
+                                                        className="bg-transparent border-none focus:bg-white focus:ring-1 focus:ring-blue-100 rounded px-1 py-1 text-[9px] font-mono text-blue-500 transition-all outline-none"
+                                                    />
+                                                </td>
+                                                <td className="px-3 py-2 border-r border-slate-100 text-center font-bold text-[9px] text-slate-500">
+                                                    {(() => {
+                                                        if (!task.scheduled_date || !task.target_date) return '---';
+                                                        const s = new Date(task.scheduled_date);
+                                                        const t = new Date(task.target_date);
+                                                        const diff = Math.floor((t - s) / (1000 * 60 * 60 * 24));
+                                                        return <span className={diff > 7 ? 'text-rose-500' : 'text-emerald-500'}>{diff} H</span>;
+                                                    })()}
+                                                </td>
+                                                <td className="px-4 py-2 border-r border-slate-100 pr-4">
+                                                    {devMode ? (
+                                                        <select 
+                                                            value={task.technician_id || ''} 
+                                                            onChange={(e) => updateTaskField(task.id, 'technician_id', e.target.value)}
+                                                            className={`bg-white border rounded px-1 py-0.5 text-[9px] font-bold outline-none w-full ${modifiedTaskIds.has(task.id) ? 'text-emerald-500 border-emerald-200' : 'border-slate-200 text-slate-600'}`}
+                                                        >
+                                                            <option value="">UNASSIGNED</option>
+                                                            {technicians.map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+                                                        </select>
+                                                    ) : (
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-5 h-5 bg-slate-100 rounded-md border border-slate-200 flex items-center justify-center text-slate-400 text-[8px] font-black">{task.technicians?.name?.[0]}</div>
+                                                            <span className="truncate text-slate-600">{task.technicians?.name || 'UNASSIGNED'}</span>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2 text-center align-middle border-r border-slate-100">
                                                     {perf === 'MEET' ? (
                                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500 text-white rounded-full text-[8px] font-black shadow-lg shadow-emerald-200"><FiCheckCircle size={10} /> MEET</span>
                                                     ) : perf === 'MISS' ? (
@@ -655,6 +876,38 @@ export default function MaintenanceTracker({ typeFilter }) {
                                                     ) : (
                                                         <span className="px-3 py-1 bg-slate-100 text-slate-300 rounded-full text-[8px] font-black">PENDING</span>
                                                     )}
+                                                </td>
+                                                <td className="px-3 py-2 border-r border-slate-100 text-center font-mono">
+                                                    {devMode ? (
+                                                        <input 
+                                                            type="date" 
+                                                            defaultValue={task.completed_date || ''} 
+                                                            onBlur={(e) => updateTaskField(task.id, 'completed_date', e.target.value)}
+                                                            className={`bg-transparent border-none focus:bg-white focus:ring-1 focus:ring-blue-100 rounded px-1 py-1 text-[9px] font-mono outline-none w-full ${modifiedTaskIds.has(task.id) ? 'text-emerald-500 font-bold' : 'text-slate-600'}`}
+                                                        />
+                                                    ) : task.completed_date ? (
+                                                        <span className="text-slate-700">{formatDate(task.completed_date)}</span>
+                                                    ) : (
+                                                        <span className="text-slate-200 italic text-[8px]">WAITING</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2">
+                                                    <input 
+                                                        type="text"
+                                                        defaultValue={task.reason || (perf === 'MEET' ? 'DONE' : '')}
+                                                        onBlur={(e) => updateTaskReason(task.id, e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                e.target.blur();
+                                                            }
+                                                        }}
+                                                        className={`w-full bg-transparent border-none focus:bg-white focus:ring-1 focus:ring-blue-100 rounded px-1 py-1 text-[9px] transition-all placeholder:text-slate-200 ${
+                                                            (task.reason === 'DONE' || (!task.reason && perf === 'MEET')) 
+                                                            ? 'text-emerald-600 font-black' 
+                                                            : 'text-slate-500 italic font-medium'
+                                                        }`}
+                                                        placeholder="Add reason..."
+                                                    />
                                                 </td>
                                             </tr>
                                         );
@@ -812,19 +1065,29 @@ export default function MaintenanceTracker({ typeFilter }) {
                                         <input required type="date" value={newTask.scheduled_date} onChange={(e) => setNewTask({ ...newTask, scheduled_date: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-200 text-[10px] font-black text-slate-700 outline-none" />
                                     </div>
                                     <div className="space-y-2">
+                                        <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4 text-blue-500">TARGET DATE</label>
+                                        <input type="date" value={newTask.target_date} onChange={(e) => setNewTask({ ...newTask, target_date: e.target.value })} className="w-full bg-blue-50/30 p-4 rounded-2xl border border-blue-100 text-[10px] font-black text-blue-600 outline-none focus:border-blue-400 transition-all" />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div className="space-y-2">
                                         <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4">WORK TYPE</label>
                                         <select value={newTask.type} onChange={(e) => setNewTask({ ...newTask, type: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-200 text-[10px] font-black text-slate-700 outline-none">
                                             <option value="PM">PREVENTIVE (PM)</option>
                                             <option value="CM">CORRECTIVE (CM)</option>
                                         </select>
                                     </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4">ASSIGNED OPS ENGINEER</label>
+                                        <select required value={newTask.technician_id} onChange={(e) => setNewTask({ ...newTask, technician_id: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-200 text-[10px] font-black text-slate-700 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all">
+                                            <option value="">SELECT PERSONNEL...</option>
+                                            {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                        </select>
+                                    </div>
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4">ASSIGNED OPS ENGINEER</label>
-                                    <select required value={newTask.technician_id} onChange={(e) => setNewTask({ ...newTask, technician_id: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-200 text-[10px] font-black text-slate-700 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all">
-                                        <option value="">SELECT PERSONNEL...</option>
-                                        {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                                    </select>
+                                    <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4">REASON / NOTES</label>
+                                    <input type="text" value={newTask.reason} onChange={(e) => setNewTask({ ...newTask, reason: e.target.value })} placeholder="Optional SLA reason..." className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-200 text-[10px] font-black text-slate-700 outline-none focus:border-blue-400 transition-all" />
                                 </div>
                                 <button disabled={isSaving} type="submit" className="w-full py-6 mt-6 bg-blue-600 text-white rounded-3xl font-black text-[11px] tracking-[0.4em] uppercase shadow-2xl shadow-blue-200 hover:bg-blue-700 hover:-translate-y-1 active:scale-95 transition-all disabled:opacity-50">
                                     {isSaving ? 'EXECUTING SYNC...' : 'COMMIT NEW RECORD'}
@@ -871,44 +1134,48 @@ export default function MaintenanceTracker({ typeFilter }) {
                                         <table className="w-full text-left text-[11px] uppercase tracking-tight">
                                             <thead className="bg-white border-b border-slate-100 text-slate-300 sticky top-0 z-10">
                                                 <tr>
-                                                    <th className="px-10 py-6">ID TICKET</th>
-                                                    <th className="px-10 py-6">DESCRIPTION</th>
-                                                    <th className="px-10 py-6 text-center">PLAN</th>
-                                                    <th className="px-10 py-6 text-center">STATUS</th>
-                                                    <th className="px-10 py-6 text-right">TARGET TECH</th>
+                                                    <th className="px-6 py-6">ID TICKET</th>
+                                                    <th className="px-6 py-6">DESCRIPTION</th>
+                                                    <th className="px-6 py-6 text-center">PLAN</th>
+                                                    <th className="px-6 py-6 text-center font-black text-blue-500">TARGET</th>
+                                                    <th className="px-6 py-6 text-center">STATUS</th>
+                                                    <th className="px-6 py-6 text-right">TARGET TECH</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-100/50 bg-white/40">
                                                 {importData.invalidRecords?.map((r, i) => (
                                                     <tr key={`inv-${i}`} className="bg-rose-50/30 group">
-                                                        <td className="px-10 py-4 text-rose-600 font-mono italic">{r.tid_preview}</td>
-                                                        <td className="px-10 py-4 text-slate-400 truncate max-w-[200px]">{r.site_preview}</td>
-                                                        <td className="px-10 py-4 text-center text-rose-300 line-through">{r.scheduled_date}</td>
-                                                        <td className="px-10 py-4 text-center">
+                                                        <td className="px-6 py-4 text-rose-600 font-mono italic">{r.tid_preview}</td>
+                                                        <td className="px-6 py-4 text-slate-400 truncate max-w-[150px]">{r.site_preview}</td>
+                                                        <td className="px-6 py-4 text-center text-rose-300 line-through">{formatDate(r.scheduled_date)}</td>
+                                                        <td className="px-6 py-4 text-center text-slate-200">---</td>
+                                                        <td className="px-6 py-4 text-center">
                                                             <span className="px-2 py-1 bg-rose-600 text-white rounded text-[8px] font-black shadow-sm group-hover:animate-bounce">ERR: {r.reason}</span>
                                                         </td>
-                                                        <td className="px-10 py-4 text-right opacity-40 italic">SKIPPED</td>
+                                                        <td className="px-6 py-4 text-right opacity-40 italic">SKIPPED</td>
                                                     </tr>
                                                 ))}
                                                 {importData.newRecords.map((r, i) => (
                                                     <tr key={`new-${i}`} className="hover:bg-emerald-50/20">
-                                                        <td className="px-10 py-4 text-emerald-600 font-mono flex items-center gap-2">
+                                                        <td className="px-6 py-4 text-emerald-600 font-mono flex items-center gap-2">
                                                             {r.tid_preview}
                                                             {r.is_new_asset && <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded-[4px] text-[7px] font-black animate-pulse">NEW ASSET</span>}
                                                         </td>
-                                                        <td className="px-10 py-4 text-slate-600 truncate max-w-[200px]">{r.site_preview}</td>
-                                                        <td className="px-10 py-4 text-center text-slate-400">{r.scheduled_date}</td>
-                                                        <td className="px-10 py-4 text-center"><span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[9px] font-black">NEW TASK</span></td>
-                                                        <td className="px-10 py-4 text-right opacity-40 italic">{r.tech_preview}</td>
+                                                        <td className="px-6 py-4 text-slate-600 truncate max-w-[150px]">{r.site_preview}</td>
+                                                        <td className="px-6 py-4 text-center text-slate-400">{formatDate(r.scheduled_date)}</td>
+                                                        <td className="px-6 py-4 text-center text-blue-500 font-bold">{formatDate(r.target_date)}</td>
+                                                        <td className="px-6 py-4 text-center"><span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[9px] font-black">NEW TASK</span></td>
+                                                        <td className="px-6 py-4 text-right opacity-40 italic">{r.tech_preview}</td>
                                                     </tr>
                                                 ))}
                                                 {importData.updateRecords.map((r, i) => (
                                                     <tr key={`upd-${i}`} className="hover:bg-amber-50/20">
-                                                        <td className="px-10 py-4 text-amber-600 font-mono">{r.tid_preview}</td>
-                                                        <td className="px-10 py-4 text-slate-600 truncate max-w-[200px]">{r.site_preview}</td>
-                                                        <td className="px-10 py-4 text-center text-slate-400">{r.scheduled_date}</td>
-                                                        <td className="px-10 py-4 text-center"><span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-[9px] font-black">UPDATE</span></td>
-                                                        <td className="px-10 py-4 text-right opacity-40 italic">{r.tech_preview}</td>
+                                                        <td className="px-6 py-4 text-amber-600 font-mono">{r.tid_preview}</td>
+                                                        <td className="px-6 py-4 text-slate-600 truncate max-w-[150px]">{r.site_preview}</td>
+                                                        <td className="px-6 py-4 text-center text-slate-400">{formatDate(r.scheduled_date)}</td>
+                                                        <td className="px-6 py-4 text-center text-blue-500 font-bold">{formatDate(r.target_date)}</td>
+                                                        <td className="px-6 py-4 text-center"><span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-[9px] font-black">UPDATE</span></td>
+                                                        <td className="px-6 py-4 text-right opacity-40 italic">{r.tech_preview}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -924,6 +1191,30 @@ export default function MaintenanceTracker({ typeFilter }) {
                             </div>
                         </motion.div>
                     </div>
+                )}
+            </AnimatePresence>
+
+            {/* Context Menu Overlay */}
+            <AnimatePresence>
+                {contextMenu.visible && (
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }} 
+                        animate={{ opacity: 1, scale: 1 }} 
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="fixed bg-white border border-slate-200 shadow-2xl rounded-xl py-2 z-[200] min-w-[160px] overflow-hidden"
+                        style={{ top: contextMenu.y, left: contextMenu.x }}
+                    >
+                        <div className="px-4 py-2 text-[8px] font-black text-slate-300 uppercase tracking-widest border-b border-slate-50 mb-1">Sorting Control</div>
+                        <button onClick={() => requestSort(contextMenu.key, 'asc')} className="w-full px-4 py-2 text-left text-[10px] font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2 transition-all">
+                            <FiChevronUp size={14} /> Sort Ascending
+                        </button>
+                        <button onClick={() => requestSort(contextMenu.key, 'desc')} className="w-full px-4 py-2 text-left text-[10px] font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2 transition-all">
+                            <FiChevronDown size={14} /> Sort Descending
+                        </button>
+                        <button onClick={() => requestSort(contextMenu.key, 'clear')} className="w-full px-4 py-2 text-left text-[10px] font-bold text-rose-500 hover:bg-rose-50 flex items-center gap-2 transition-all border-t border-slate-50 mt-1">
+                            <FiMinus size={14} /> Clear Sort
+                        </button>
+                    </motion.div>
                 )}
             </AnimatePresence>
         </motion.div>

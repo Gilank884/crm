@@ -33,42 +33,43 @@ export default function AssetInventory() {
     }, []);
 
     const fetchInitialData = async () => {
-        const { data: kwData } = await supabase.from('kanwils').select('*').order('name', { ascending: true });
-        const { data: techData } = await supabase.from('technicians').select('id, name').order('name', { ascending: true });
-        setKanwils(kwData || []);
-        setTechnicians(techData || []);
-        
-        const urlKanwil = searchParams.get('kanwil');
-        const urlPicId = searchParams.get('pic_id');
-        
-        if (urlPicId) {
-            fetchAssets('all', pageSize, urlPicId);
-        } else if (urlKanwil) {
-            setSelectedKanwil(urlKanwil);
-            fetchAssets(urlKanwil, pageSize);
-        } else {
-            fetchAssets(selectedKanwil, pageSize);
+        setLoading(true);
+        try {
+            // Parallel fetch for static lookups
+            const [kwRes, techRes] = await Promise.all([
+                supabase.from('kanwils').select('id, name, code').order('name'),
+                supabase.from('technicians').select('id, name').order('name')
+            ]);
+            
+            setKanwils(kwRes.data || []);
+            setTechnicians(techRes.data || []);
+            
+            const urlKanwil = searchParams.get('kanwil');
+            const urlPicId = searchParams.get('pic_id');
+            
+            // Initiate asset fetch immediately
+            const initialKanwil = urlKanwil || selectedKanwil;
+            await fetchAssets(initialKanwil, pageSize, urlPicId);
+        } finally {
+            setLoading(false);
         }
     };
 
     const fetchAssets = async (kanwilId = selectedKanwil, limit = pageSize, picId = null) => {
         setLoading(true);
         let query = supabase.from('managed_assets').select(`
-            *,
-            kanwils(name, code),
-            technicians!managed_assets_pic_id_fkey(name)
+            id, tid, name, location, kanwil_id, pic_id, kc_supervisi, dk_lk, status,
+            kanwils ( name, code ),
+            technicians!managed_assets_pic_id_fkey ( name )
         `);
         
         if (kanwilId !== 'all') query = query.eq('kanwil_id', kanwilId);
         if (picId) query = query.eq('pic_id', picId);
         
-        if (limit !== 'all') {
-            query = query.limit(limit);
-        } else {
-            query = query.limit(2000); // 2000 for "All" safety cap
-        }
+        query = query.order('tid', { ascending: true })
+            .limit(limit === 'all' ? 2000 : limit);
         
-        const { data, error } = await query.order('tid', { ascending: true });
+        const { data, error } = await query;
         if (error) console.error(error);
         else setAssets(data || []);
         setLoading(false);

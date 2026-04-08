@@ -68,6 +68,7 @@ export default function Login() {
                 localStorage.setItem('user', JSON.stringify({
                     id: data.id,
                     no_npp: data.no_npp,
+                    name: data.name,
                     loggedInAt: new Date().toISOString()
                 }));
                 navigate('/dashboard');

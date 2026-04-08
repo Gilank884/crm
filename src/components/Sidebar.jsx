@@ -8,7 +8,7 @@ const navItems = [
     { name: 'Database Teknisi', path: '/technicians', icon: FiUsers },
     { name: 'Master Data', path: '/assets', icon: FiBox },
     { name: 'Monthly PM', path: '/maintenance/pm', icon: FiCalendar },
-    { name: 'Monthly CM', path: '/maintenance/cm', icon: FiTool },
+
 ];
 
 
@@ -31,11 +31,10 @@ export default function Sidebar() {
                         <button
                             key={item.path}
                             onClick={() => navigate(item.path)}
-                            className={`sidebar-btn w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 group ${
-                                location.pathname === item.path 
-                                ? 'active bg-blue-50 text-blue-600 shadow-sm' 
-                                : 'text-slate-500 hover:bg-slate-50'
-                            }`}
+                            className={`sidebar-btn w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 group ${location.pathname === item.path
+                                    ? 'active bg-blue-50 text-blue-600 shadow-sm'
+                                    : 'text-slate-500 hover:bg-slate-50'
+                                }`}
                         >
                             <span className={`text-xl transition-transform group-hover:scale-110 ${location.pathname === item.path ? 'scale-110' : ''}`}>
                                 <item.icon />
@@ -47,14 +46,14 @@ export default function Sidebar() {
             </motion.div>
 
             <div className="mt-auto flex flex-col gap-4">
-                <button 
+                <button
                     onClick={handleLogout}
                     className="flex items-center gap-4 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 transition-all font-semibold text-sm group"
                 >
                     <FiLogOut className="text-xl transition-transform group-hover:-translate-x-1" />
                     <span>Logout Account</span>
                 </button>
-                
+
                 <div className="pt-6 border-t border-slate-100 text-[10px] font-bold text-slate-400 px-2 uppercase tracking-tight">
                     Refocused CRM JST v1.0
                 </div>

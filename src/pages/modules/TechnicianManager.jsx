@@ -52,40 +52,47 @@ export default function TechnicianManager() {
     }, []);
 
     const fetchInitialData = async () => {
-        const { data: kwData } = await supabase.from('kanwils').select('*').order('name', { ascending: true });
-        setKanwils(kwData || []);
-        
-        if (activeTab === 'performance') {
-            fetchPerformanceStats(selectedMonth);
-        } else {
-            const urlKanwil = searchParams.get('kanwil');
-            if (urlKanwil) {
-                setSelectedKanwil(urlKanwil);
-                fetchTechnicians(urlKanwil, pageSize);
+        setLoading(true);
+        try {
+            // Parallel fetch for lookups
+            const [kwRes] = await Promise.all([
+                supabase.from('kanwils').select('id, name, code').order('name')
+            ]);
+            setKanwils(kwRes.data || []);
+            
+            if (activeTab === 'performance') {
+                await fetchPerformanceStats(selectedMonth);
             } else {
-                fetchTechnicians(selectedKanwil, pageSize);
+                const urlKanwil = searchParams.get('kanwil');
+                const initialKanwil = urlKanwil || selectedKanwil;
+                if (urlKanwil) setSelectedKanwil(urlKanwil);
+                await fetchTechnicians(initialKanwil, pageSize);
             }
+        } finally {
+            setLoading(false);
         }
     };
 
     const fetchPerformanceStats = async (period) => {
         setLoading(true);
         try {
-            const { data: tasks, error: tErr } = await supabase
-                .from('maintenance_tasks')
-                .select('technician_id, type, scheduled_date, completed_date')
-                .eq('period', period);
+            // Parallel fetch for tasks and technicians
+            const [tasksRes, techsRes] = await Promise.all([
+                supabase.from('maintenance_tasks')
+                    .select('technician_id, type, scheduled_date, completed_date, target_date')
+                    .eq('period', period),
+                supabase.from('technicians')
+                    .select('id, name, kanwil_id, kanwils(name)')
+            ]);
             
-            if (tErr) throw tErr;
+            if (tasksRes.error) throw tasksRes.error;
+            if (techsRes.error) throw techsRes.error;
 
-            const { data: techs, error: techErr } = await supabase
-                .from('technicians')
-                .select('id, name, kanwil_id, kanwils(name)');
-            
-            if (techErr) throw techErr;
+            const tasks = tasksRes.data || [];
+            const techs = techsRes.data || [];
 
             const stats = techs.map(tech => {
-                const techTasks = tasks?.filter(t => t.technician_id === tech.id) || [];
+                const techTasks = tasks.filter(t => t.technician_id === tech.id);
                 const pmTasks = techTasks.filter(t => t.type === 'PM');
                 const cmTasks = techTasks.filter(t => t.type === 'CM');
 

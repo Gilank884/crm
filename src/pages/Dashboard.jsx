@@ -43,60 +43,85 @@ export default function Dashboard() {
         const fetchAllStats = async () => {
             setLoading(true);
             
-            const results = {};
-            for (const mod of moduleConfig) {
-                const { count, error } = await supabase
-                    .from(mod.table)
-                    .select('*', { count: 'exact', head: true });
-                results[mod.name] = error ? 0 : count;
-            }
-            setCounts(results);
+            try {
+                // 1. Parallelize Module Counts
+                const countPromises = moduleConfig.map(mod => 
+                    supabase.from(mod.table).select('*', { count: 'exact', head: true })
+                );
 
-            const { data: mData, error: mError } = await supabase
-                .from('maintenance_tasks')
-                .select(`
-                    completed_date,
-                    managed_assets (
-                        kanwils ( name )
-                    )
-                `)
-                .gte('scheduled_date', startDate)
-                .lte('scheduled_date', endDate)
-                .limit(2000);
-            
-            if (!mError && mData) {
+                // 2. Parallelize Maintenance Data (Charts + Queue)
+                const maintenancePromise = supabase
+                    .from('maintenance_tasks')
+                    .select(`
+                        scheduled_date,
+                        completed_date,
+                        target_date,
+                        managed_assets ( kanwils ( name ) )
+                    `)
+                    .gte('scheduled_date', startDate)
+                    .lte('scheduled_date', endDate)
+                    .limit(2000);
+
+                const queuePromise = supabase
+                    .from('maintenance_tasks')
+                    .select(`
+                        id, type, scheduled_date, target_date,
+                        managed_assets ( name, tid, location )
+                    `)
+                    .gte('scheduled_date', startDate)
+                    .lte('scheduled_date', endDate)
+                    .is('completed_date', null)
+                    .order('target_date', { ascending: true })
+                    .order('scheduled_date', { ascending: true })
+                    .limit(10);
+
+                // Execute ALL in parallel
+                const [countResults, mResponse, queueResponse] = await Promise.all([
+                    Promise.all(countPromises),
+                    maintenancePromise,
+                    queuePromise
+                ]);
+
+                // 3. Process Counts
+                const results = {};
+                moduleConfig.forEach((mod, idx) => {
+                    results[mod.name] = countResults[idx].error ? 0 : countResults[idx].count;
+                });
+                setCounts(results);
+
+                // 4. Process Chart Data (SLA Logic)
+                const mData = mResponse.data || [];
                 const regionalMap = {};
                 mData.forEach(task => {
                     const kanwilName = task.managed_assets?.kanwils?.name || 'Unknown';
                     if (!regionalMap[kanwilName]) {
-                        regionalMap[kanwilName] = { name: kanwilName, close: 0, open: 0 };
+                        regionalMap[kanwilName] = { name: kanwilName, meet: 0, miss: 0, pending: 0 };
                     }
-                    if (task.completed_date) {
-                        regionalMap[kanwilName].close++;
+                    
+                    if (!task.scheduled_date || !task.completed_date) {
+                        regionalMap[kanwilName].pending++;
                     } else {
-                        regionalMap[kanwilName].open++;
+                        const scheduled = new Date(task.scheduled_date);
+                        const completed = new Date(task.completed_date);
+                        let status = 'MISS';
+                        if (task.target_date) {
+                            status = completed <= new Date(task.target_date) ? 'MEET' : 'MISS';
+                        } else {
+                            const diff = Math.floor(Math.abs(completed - scheduled) / (1000 * 60 * 60 * 24));
+                            status = diff <= 7 ? 'MEET' : 'MISS';
+                        }
+                        status === 'MEET' ? regionalMap[kanwilName].meet++ : regionalMap[kanwilName].miss++;
                     }
                 });
-                setChartData(Object.values(regionalMap).sort((a, b) => b.close - a.close));
-            }
+                setChartData(Object.values(regionalMap).sort((a, b) => b.meet - a.meet));
 
-            const { data: openTasksData, error: openTasksError } = await supabase
-                .from('maintenance_tasks')
-                .select(`
-                    *,
-                    managed_assets ( name, tid, location )
-                `)
-                .gte('scheduled_date', startDate)
-                .lte('scheduled_date', endDate)
-                .is('completed_date', null)
-                .order('scheduled_date', { ascending: true })
-                .limit(10);
-            
-            if (!openTasksError && openTasksData) {
-                setOpenTasks(openTasksData);
+                // 5. Update Queue
+                setOpenTasks(queueResponse.data || []);
+            } catch (err) {
+                console.error("Dashboard Fetch Error:", err);
+            } finally {
+                setLoading(false);
             }
-
-            setLoading(false);
         };
         fetchAllStats();
     }, [startDate, endDate]);
@@ -189,19 +214,23 @@ export default function Dashboard() {
                             <FiActivity fontSize={20} />
                         </div>
                         <div>
-                            <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight leading-tight">Regional Performance</h2>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">Mastery vs Pending Grouped By Kanwil</p>
+                            <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight leading-tight">Regional Performance Metrics</h2>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">SLA Compliance & Visit Progress By Kanwil</p>
                         </div>
                     </div>
 
                     <div className="flex gap-4">
-                        <div className="bg-green-50 border border-green-100 rounded-2xl px-5 py-2 flex flex-col items-center">
-                            <span className="text-[8px] font-black text-green-600 uppercase tracking-widest mb-0.5">Grand Total Close</span>
-                            <span className="text-lg font-black text-green-700 leading-none">{chartData.reduce((acc, curr) => acc + curr.close, 0)}</span>
+                        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl px-5 py-2 flex flex-col items-center">
+                            <span className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-0.5">Grand Total IN SLA</span>
+                            <span className="text-lg font-black text-emerald-700 leading-none">{chartData.reduce((acc, curr) => acc + curr.meet, 0)}</span>
+                        </div>
+                        <div className="bg-rose-50 border border-rose-100 rounded-2xl px-5 py-2 flex flex-col items-center">
+                            <span className="text-[8px] font-black text-rose-600 uppercase tracking-widest mb-0.5">Grand Total OUT SLA</span>
+                            <span className="text-lg font-black text-rose-700 leading-none">{chartData.reduce((acc, curr) => acc + curr.miss, 0)}</span>
                         </div>
                         <div className="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-2 flex flex-col items-center">
-                            <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest mb-0.5">Grand Total Open</span>
-                            <span className="text-lg font-black text-amber-700 leading-none">{chartData.reduce((acc, curr) => acc + curr.open, 0)}</span>
+                            <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest mb-0.5">Grand Total Pending</span>
+                            <span className="text-lg font-black text-amber-700 leading-none">{chartData.reduce((acc, curr) => acc + curr.pending, 0)}</span>
                         </div>
                     </div>
                 </div>
@@ -242,18 +271,25 @@ export default function Dashboard() {
                                     wrapperStyle={{ paddingBottom: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase' }}
                                 />
                                 <Bar 
-                                    dataKey="close" 
-                                    name="Close (Done)" 
-                                    fill="#16a34a" 
+                                    dataKey="meet" 
+                                    name="IN SLA (Meet)" 
+                                    fill="#10b981" 
                                     radius={[0, 4, 4, 0]} 
-                                    barSize={16}
+                                    barSize={12}
                                 />
                                 <Bar 
-                                    dataKey="open" 
-                                    name="Open (Pending)" 
+                                    dataKey="miss" 
+                                    name="OUT SLA (Miss)" 
+                                    fill="#f43f5e" 
+                                    radius={[0, 4, 4, 0]} 
+                                    barSize={12}
+                                />
+                                <Bar 
+                                    dataKey="pending" 
+                                    name="In Progress" 
                                     fill="#f59e0b" 
                                     radius={[0, 4, 4, 0]} 
-                                    barSize={16}
+                                    barSize={12}
                                 />
                             </BarChart>
                         </ResponsiveContainer>
@@ -269,14 +305,18 @@ export default function Dashboard() {
                             {chartData.map((reg, i) => (
                                 <div key={i} className="flex flex-col gap-2 p-3 bg-white rounded-2xl border border-slate-200/50 shadow-sm">
                                     <div className="text-[11px] font-black text-slate-900 uppercase truncate">{reg.name}</div>
-                                    <div className="flex items-center gap-4">
+                                    <div className="grid grid-cols-2 gap-2">
                                         <div className="flex items-center gap-1.5">
-                                            <div className="w-1.5 h-1.5 rounded-full bg-green-600" />
-                                            <span className="text-[10px] font-black text-green-600">{reg.close} Close</span>
+                                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                            <span className="text-[9px] font-black text-emerald-600">{reg.meet} MEET</span>
                                         </div>
                                         <div className="flex items-center gap-1.5">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                            <span className="text-[9px] font-black text-rose-600">{reg.miss} MISS</span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 col-span-2">
                                             <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                            <span className="text-[10px] font-black text-amber-600">{reg.open} Open</span>
+                                            <span className="text-[9px] font-black text-amber-600">{reg.pending} PENDING</span>
                                         </div>
                                     </div>
                                 </div>
@@ -287,12 +327,16 @@ export default function Dashboard() {
 
                 <div className="flex items-center justify-center gap-8 mt-10 pt-6 border-t border-slate-50">
                     <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-green-600" />
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Region Full Target</span>
+                        <div className="w-3 h-3 rounded-full bg-emerald-500" />
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">In SLA Mastery</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-rose-500" />
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Out SLA Warning</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full bg-amber-500" />
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Region Needs Field Visit</span>
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Progressing Visit</span>
                     </div>
                 </div>
             </motion.div>
@@ -307,7 +351,7 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between mb-8">
                     <div>
                         <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
-                             <div className="w-2 h-6 bg-amber-500 rounded-full" /> Open Maintenance Tasks
+                             <div className="w-2 h-6 bg-blue-600 rounded-full" /> Prioritas Pengerjaan (Target Terdekat)
                         </h2>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Pending schedules requiring field visit</p>
                     </div>
@@ -326,7 +370,7 @@ export default function Dashboard() {
                                 <th className="px-6 py-4">Asset ID</th>
                                 <th className="px-6 py-4">Site Name</th>
                                 <th className="px-6 py-4 text-center">Category</th>
-                                <th className="px-6 py-4 text-center">Scheduled</th>
+                                <th className="px-6 py-4 text-center text-blue-600">Target Date</th>
                                 <th className="px-6 py-4 text-right">Action</th>
                             </tr>
                         </thead>
@@ -348,7 +392,15 @@ export default function Dashboard() {
                                             <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase border ${task.type === 'PM' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>{task.type}</span>
                                         </td>
                                         <td className="px-6 py-4 text-center">
-                                            <span className="text-[10px] text-slate-400 font-black">{task.scheduled_date}</span>
+                                            <span className="text-[10px] text-blue-600 font-black">
+                                                {task.target_date ? (() => {
+                                                    const d = new Date(task.target_date);
+                                                    const day = d.getDate().toString().padStart(2, '0');
+                                                    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+                                                    const year = d.getFullYear();
+                                                    return `${day}/${month}/${year}`;
+                                                })() : 'NO TARGET'}
+                                            </span>
                                         </td>
                                         <td className="px-6 py-4 text-right">
                                             <button 
