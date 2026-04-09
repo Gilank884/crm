@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { FiUpload, FiPlus, FiUser, FiMapPin, FiBox, FiXCircle, FiCheckCircle, FiInfo, FiAlertCircle, FiDatabase, FiSearch, FiList, FiActivity, FiTool } from 'react-icons/fi';
+import { FiUpload, FiPlus, FiUser, FiMapPin, FiBox, FiXCircle, FiCheckCircle, FiInfo, FiAlertCircle, FiDatabase, FiSearch, FiList, FiActivity, FiTool, FiEdit3 } from 'react-icons/fi';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile } from '../../utils/excelHandler';
 
@@ -27,6 +27,40 @@ export default function AssetInventory() {
     // Import Preview State
     const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
     const [importData, setImportData] = useState({ newRecords: [], duplicateRecords: [] });
+
+    // Developer Mode State
+    const [devMode, setDevMode] = useState(false);
+    const [modifiedAssetIds, setModifiedAssetIds] = useState(new Set());
+    const [toast, setToast] = useState({ visible: false, message: '' });
+    const [isSearchOpen, setIsSearchOpen] = useState(false);
+    const searchInputRef = useRef(null);
+
+    const showToast = (message) => {
+        setToast({ visible: true, message });
+        setTimeout(() => setToast({ visible: false, message: '' }), 2000);
+    };
+
+    // Cmd+F Listener
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+                e.preventDefault();
+                setIsSearchOpen(true);
+            }
+            if (e.key === 'Escape') {
+                setIsSearchOpen(false);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    // Focus search input when modal opens
+    useEffect(() => {
+        if (isSearchOpen && searchInputRef.current) {
+            searchInputRef.current.focus();
+        }
+    }, [isSearchOpen]);
 
     useEffect(() => {
         fetchInitialData();
@@ -171,6 +205,22 @@ export default function AssetInventory() {
         setIsSaving(false);
     };
 
+    const updateAssetField = async (assetId, field, value) => {
+        const { error } = await supabase
+            .from('managed_assets')
+            .update({ [field]: value === '' ? null : value })
+            .eq('id', assetId);
+            
+        if (error) {
+            console.error("Update failed:", error);
+            alert(`Gagal update database: ${error.message}`);
+        } else {
+            setAssets(prev => prev.map(a => a.id === assetId ? { ...a, [field]: value } : a));
+            setModifiedAssetIds(prev => new Set(prev).add(assetId));
+            showToast("DATA ASSET TERSIMPAN");
+        }
+    };
+
     const handleAddAsset = async (e) => {
         e.preventDefault();
         setIsSaving(true);
@@ -231,6 +281,23 @@ export default function AssetInventory() {
                             <FiSearch size={13} className="text-slate-300" />
                             <input type="text" placeholder="Search TID, Site, Technician..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-transparent border-none outline-none text-[10px] font-bold text-slate-700 w-48 ml-2 placeholder:text-slate-300" />
                         </div>
+                        <div className="w-px h-6 bg-slate-200" />
+                        <button 
+                            onClick={() => {
+                                if (devMode) {
+                                    if (window.confirm("Keluar dari Developer Mode? Semua perubahan instan akan tetap tersimpan.")) {
+                                        setDevMode(false);
+                                        setModifiedAssetIds(new Set());
+                                    }
+                                } else {
+                                    setDevMode(true);
+                                }
+                            }} 
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-black text-[9px] tracking-wider uppercase transition-all shadow-sm ${devMode ? 'bg-amber-100 text-amber-600 border border-amber-200 ring-2 ring-amber-50' : 'bg-slate-50 text-slate-400 border border-slate-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200'}`}
+                            title="Toggle Developer Mode"
+                        >
+                            <FiEdit3 size={13} /> {devMode ? 'Exit Dev' : 'Dev Mode'}
+                        </button>
                         <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-black text-[9px] tracking-wider uppercase transition-all shadow-sm active:scale-95">
                             <FiPlus size={13} /> Asset
                         </button>
@@ -294,23 +361,99 @@ export default function AssetInventory() {
                                 <tr><td colSpan="8" className="py-32 text-center text-[10px] font-black text-slate-200 uppercase tracking-[0.5em] italic">Zero Assets Found</td></tr>
                             ) : (
                                 filteredAssets.map((asset, idx) => (
-                                    <tr key={asset.id} className="text-[10px] uppercase font-bold hover:bg-slate-50 transition-colors group">
+                                    <tr key={asset.id} className={`text-[10px] uppercase font-bold hover:bg-slate-50 transition-colors group ${modifiedAssetIds.has(asset.id) ? 'bg-emerald-50/30' : ''}`}>
                                         <td className="px-3 py-2 border-r border-slate-100 text-center bg-slate-100/10 text-slate-300 font-mono text-[9px]">{idx + 1}</td>
-                                        <td className="px-3 py-2 border-r border-slate-100 font-mono text-indigo-500 bg-indigo-50/10 text-[9px]">{asset.tid || '---'}</td>
+                                        <td className="px-3 py-2 border-r border-slate-100 font-mono text-indigo-500 bg-indigo-50/10 text-[9px]">
+                                            {devMode ? (
+                                                <input 
+                                                    type="text" 
+                                                    value={asset.tid || ''} 
+                                                    onChange={(e) => updateAssetField(asset.id, 'tid', e.target.value)}
+                                                    className="bg-white border border-indigo-200 rounded px-1 w-full outline-none focus:ring-1 focus:ring-indigo-400"
+                                                />
+                                            ) : (
+                                                asset.tid || '---'
+                                            )}
+                                        </td>
                                         <td className="px-3 py-2 border-r border-slate-100 truncate pr-4">
-                                            <div className="text-slate-800 tracking-tight">{asset.name}</div>
-                                            <div className="text-[7px] text-slate-300 lowercase italic truncate mt-0.5">{asset.location || 'No physical address found'}</div>
+                                            {devMode ? (
+                                                <div className="flex flex-col gap-1">
+                                                    <input 
+                                                        type="text" 
+                                                        value={asset.name || ''} 
+                                                        onChange={(e) => updateAssetField(asset.id, 'name', e.target.value)}
+                                                        className="bg-white border border-slate-200 rounded px-1 w-full outline-none focus:ring-1 focus:ring-blue-400 text-slate-800"
+                                                    />
+                                                    <input 
+                                                        type="text" 
+                                                        value={asset.location || ''} 
+                                                        onChange={(e) => updateAssetField(asset.id, 'location', e.target.value)}
+                                                        className="bg-white border border-slate-200 rounded px-1 w-full outline-none focus:ring-1 focus:ring-blue-400 text-[7px] text-slate-400"
+                                                    />
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <div className="text-slate-800 tracking-tight">{asset.name}</div>
+                                                    <div className="text-[7px] text-slate-300 lowercase italic truncate mt-0.5">{asset.location || 'No physical address found'}</div>
+                                                </>
+                                            )}
                                         </td>
-                                        <td className="px-3 py-2 border-r border-slate-100 text-center text-slate-400 text-[8px] italic">{asset.kc_supervisi || '---'}</td>
+                                        <td className="px-3 py-2 border-r border-slate-100 text-center text-slate-400 text-[8px] italic">
+                                            {devMode ? (
+                                                <input 
+                                                    type="text" 
+                                                    value={asset.kc_supervisi || ''} 
+                                                    onChange={(e) => updateAssetField(asset.id, 'kc_supervisi', e.target.value)}
+                                                    className="bg-white border border-slate-200 rounded px-1 w-full text-center outline-none focus:ring-1 focus:ring-blue-400"
+                                                />
+                                            ) : (
+                                                asset.kc_supervisi || '---'
+                                            )}
+                                        </td>
                                         <td className="px-3 py-2 border-r border-slate-100 text-center">
-                                            <span className={`px-2 py-0.5 rounded text-[8px] font-black border ${asset.dk_lk === 'LK' ? 'bg-amber-50 text-amber-500 border-amber-100' : 'bg-emerald-50 text-emerald-500 border-emerald-100'}`}>{asset.dk_lk || 'DK'}</span>
+                                            {devMode ? (
+                                                <select 
+                                                    value={asset.dk_lk || 'DK'} 
+                                                    onChange={(e) => updateAssetField(asset.id, 'dk_lk', e.target.value)}
+                                                    className="bg-white border border-slate-200 rounded text-[8px] outline-none"
+                                                >
+                                                    <option value="DK">DK</option>
+                                                    <option value="LK">LK</option>
+                                                </select>
+                                            ) : (
+                                                <span className={`px-2 py-0.5 rounded text-[8px] font-black border ${asset.dk_lk === 'LK' ? 'bg-amber-50 text-amber-500 border-amber-100' : 'bg-emerald-50 text-emerald-500 border-emerald-100'}`}>{asset.dk_lk || 'DK'}</span>
+                                            )}
                                         </td>
-                                        <td className="px-3 py-2 border-r border-slate-100 font-black text-slate-300 tracking-widest text-[8px]">{asset.kanwils?.code || '---'}</td>
+                                        <td className="px-3 py-2 border-r border-slate-100 font-black text-slate-300 tracking-widest text-[8px]">
+                                            {devMode ? (
+                                                <select 
+                                                    value={asset.kanwil_id || ''} 
+                                                    onChange={(e) => updateAssetField(asset.id, 'kanwil_id', e.target.value)}
+                                                    className="bg-white border border-slate-200 rounded w-full outline-none"
+                                                >
+                                                    <option value="">None</option>
+                                                    {kanwils.map(kw => <option key={kw.id} value={kw.id}>{kw.code}</option>)}
+                                                </select>
+                                            ) : (
+                                                asset.kanwils?.code || '---'
+                                            )}
+                                        </td>
                                         <td className="px-4 py-2 border-r border-slate-100 pr-4">
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-5 h-5 bg-slate-100 rounded-md border border-slate-200 flex items-center justify-center text-slate-400 text-[8px] font-black">{asset.technicians?.name?.[0] || '?'}</div>
-                                                <span className="truncate text-slate-600">{asset.technicians?.name || 'UNASSIGNED'}</span>
-                                            </div>
+                                            {devMode ? (
+                                                <select 
+                                                    value={asset.pic_id || ''} 
+                                                    onChange={(e) => updateAssetField(asset.id, 'pic_id', e.target.value)}
+                                                    className="bg-white border border-slate-200 rounded w-full outline-none text-slate-600"
+                                                >
+                                                    <option value="">Unassigned</option>
+                                                    {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                                </select>
+                                            ) : (
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-5 h-5 bg-slate-100 rounded-md border border-slate-200 flex items-center justify-center text-slate-400 text-[8px] font-black">{asset.technicians?.name?.[0] || '?'}</div>
+                                                    <span className="truncate text-slate-600">{asset.technicians?.name || 'UNASSIGNED'}</span>
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="px-3 py-2 text-center align-middle">
                                             <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500 text-white rounded-full text-[8px] font-black shadow-lg shadow-emerald-200">
@@ -423,6 +566,57 @@ export default function AssetInventory() {
                             </div>
                         </motion.div>
                     </div>
+                )}
+            </AnimatePresence>
+            {/* Advanced Cmd+F Search Popup */}
+            <AnimatePresence>
+                {isSearchOpen && (
+                    <div className="fixed inset-0 z-[1100] flex items-start justify-center pt-24 bg-slate-900/10 backdrop-blur-[2px]">
+                        <motion.div 
+                            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                            className="bg-white/90 backdrop-blur-xl border border-white shadow-[0_20px_70px_-10px_rgba(0,0,0,0.15)] rounded-2xl p-2 flex items-center gap-3 w-full max-w-xl"
+                        >
+                            <div className="flex items-center justify-center w-10 h-10 bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-200">
+                                <FiSearch size={18} />
+                            </div>
+                            <input 
+                                ref={searchInputRef}
+                                type="text" 
+                                placeholder="Pencarian Asset Cepat (TID, Site)..." 
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="bg-transparent border-none outline-none text-sm font-bold text-slate-800 flex-1 placeholder:text-slate-400"
+                            />
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg border border-slate-200">
+                                <span className="text-[9px] font-black text-slate-400 tracking-tighter uppercase">ESC to close</span>
+                            </div>
+                            <button 
+                                onClick={() => setIsSearchOpen(false)}
+                                className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                            >
+                                <FiPlus className="rotate-45" size={20} />
+                            </button>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Subtle Success Toast */}
+            <AnimatePresence>
+                {toast.visible && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-8 py-3 rounded-2xl shadow-2xl z-[1000] flex items-center gap-3 border border-emerald-400"
+                    >
+                        <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center">
+                            <FiCheckCircle size={12} />
+                        </div>
+                        <span className="text-[10px] font-black tracking-[0.2em] uppercase">{toast.message}</span>
+                    </motion.div>
                 )}
             </AnimatePresence>
         </motion.div>

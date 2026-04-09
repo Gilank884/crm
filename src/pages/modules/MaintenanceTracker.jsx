@@ -1,97 +1,49 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { FiCalendar, FiUpload, FiPlus, FiTool, FiCheckCircle, FiClock, FiFileText, FiMapPin, FiUser, FiInfo, FiActivity, FiAlertCircle, FiDownload, FiSearch, FiFilter, FiChevronRight, FiDatabase, FiBarChart2, FiList, FiEdit3, FiChevronUp, FiChevronDown, FiMinus } from 'react-icons/fi';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile, exportToExcel } from '../../utils/excelHandler';
 
-const getIsoDate = (raw) => {
-    try {
-        if (!raw) return null;
+// Sub-components
+import MaintenanceHeader from './maintenance/Header';
+import MaintenanceStats from './maintenance/Stats';
+import FilterBar from './maintenance/FilterBar';
+import TaskTable from './maintenance/TaskTable';
+import TaskChart from './maintenance/TaskChart';
+import AddTaskModal from './maintenance/AddTaskModal';
+import ImportPreviewModal from './maintenance/ImportPreviewModal';
+import TargetUpdateModal from './maintenance/TargetUpdateModal';
+import TaskDetailView from './maintenance/TaskDetailView';
+import StatListModal from './maintenance/StatListModal';
 
-        // If it's already a Date object (from Excel parser)
-        if (raw instanceof Date) {
-            if (isNaN(raw.getTime())) return null;
-            return raw.toISOString().slice(0, 10);
-        }
-
-        const str = raw.toString().trim();
-
-        // Handle DD/MM/YYYY format (e.g. 10/03/2026 = 10 March 2026)
-        const slashMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-        if (slashMatch) {
-            const day = parseInt(slashMatch[1], 10);
-            const month = parseInt(slashMatch[2], 10);
-            const year = parseInt(slashMatch[3], 10);
-            // Validate ranges
-            if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-                const d = new Date(year, month - 1, day);
-                return d.toISOString().slice(0, 10);
-            }
-        }
-
-        // Handle DD-MM-YYYY format
-        const dashMatch = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-        if (dashMatch) {
-            const day = parseInt(dashMatch[1], 10);
-            const month = parseInt(dashMatch[2], 10);
-            const year = parseInt(dashMatch[3], 10);
-            if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-                const d = new Date(year, month - 1, day);
-                return d.toISOString().slice(0, 10);
-            }
-        }
-
-        // Handle YYYY-MM-DD (ISO format) 
-        const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
-        if (isoMatch) {
-            const d = new Date(str);
-            if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-        }
-
-        // Handle Excel serial number (numeric value)
-        const num = Number(str);
-        if (!isNaN(num) && num > 40000 && num < 60000) {
-            // Excel serial date: days since 1900-01-01 (with the 1900 bug)
-            const excelEpoch = new Date(1899, 11, 30);
-            const d = new Date(excelEpoch.getTime() + num * 86400000);
-            return d.toISOString().slice(0, 10);
-        }
-
-        // Fallback: try native parsing
-        const d = new Date(str);
-        if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-
-        return null;
-    } catch (e) { return null; }
-};
+// Utilities
+import { getIsoDate, formatDate, getPerformanceStatus } from './maintenance/maintenanceUtils';
 
 export default function MaintenanceTracker({ typeFilter }) {
     const fileInputRef = useRef(null);
+    const targetFileInputRef = useRef(null);
+    
     const [tasks, setTasks] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
 
-    // Month Range State (YYYY-MM format)
-    const [startMonth, setStartMonth] = useState(() => {
+    // Date Range State (YYYY-MM-DD format)
+    const [startDate, setStartDate] = useState(() => {
         const d = new Date();
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
     });
-    const [endMonth, setEndMonth] = useState(() => {
+    const [endDate, setEndDate] = useState(() => {
         const d = new Date();
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
     });
-
-    // Convert YYYY-MM to first/last day of month
-    const getFirstDay = (ym) => `${ym}-01`;
-    const getLastDay = (ym) => {
-        const [y, m] = ym.split('-').map(Number);
-        return new Date(y, m, 0).toISOString().slice(0, 10);
-    };
+    const [dateFilterField, setDateFilterField] = useState('scheduled_date');
+    const [filterSla, setFilterSla] = useState('all');
 
     const [filterKanwil, setFilterKanwil] = useState('all');
     const [filterTechnician, setFilterTechnician] = useState('all');
     const [kanwils, setKanwils] = useState([]);
+    const [technicians, setTechnicians] = useState([]);
+    const [assets, setAssets] = useState([]);
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -99,9 +51,10 @@ export default function MaintenanceTracker({ typeFilter }) {
     const [modifiedTaskIds, setModifiedTaskIds] = useState(new Set());
     const [sortConfig, setSortConfig] = useState({ key: 'scheduled_date', direction: 'desc' });
     const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, key: null });
-    const [assets, setAssets] = useState([]);
-    const [technicians, setTechnicians] = useState([]);
+    const [isAllPeriods, setIsAllPeriods] = useState(false);
     const [rowLimit, setRowLimit] = useState(100);
+    const [viewMode, setViewMode] = useState('table');
+
     const [newTask, setNewTask] = useState({ 
         asset_id: '', 
         technician_id: '', 
@@ -109,63 +62,43 @@ export default function MaintenanceTracker({ typeFilter }) {
         period: '', 
         target_date: '',
         reason: '',
+        scheduled_date: '',
         status: 'pending' 
     });
 
     const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
-    const [importData, setImportData] = useState({ newRecords: [], updateRecords: [], skipCount: 0, openCount: 0, closedCount: 0 });
+    const [isTargetPreviewModalOpen, setIsTargetPreviewModalOpen] = useState(false);
+    const [targetUpdateData, setTargetUpdateData] = useState({ updates: [], count: 0 });
+    const [toast, setToast] = useState(null);
+    const [importData, setImportData] = useState({ newRecords: [], updateRecords: [], skipCount: 0, openCount: 0, closedCount: 0, provisionedCount: 0, totalRows: 0 });
 
-    const formatDate = (iso) => {
-        if (!iso) return '---';
-        const d = new Date(iso);
-        if (isNaN(d.getTime())) return iso; // Fallback if invalid
-        const day = d.getDate().toString().padStart(2, '0');
-        const month = (d.getMonth() + 1).toString().padStart(2, '0');
-        const year = d.getFullYear();
-        return `${day}/${month}/${year}`;
-    };
+    const [selectedTask, setSelectedTask] = useState(null);
+    const [activeStatModal, setActiveStatModal] = useState(null); // 'MEET', 'MISS', 'PENDING'
 
-    const getPerformanceStatus = (task) => {
-        if (!task.scheduled_date) return 'PENDING';
-
-        const scheduled = new Date(task.scheduled_date);
-        const completed = task.completed_date ? new Date(task.completed_date) : null;
-        const now = new Date();
-
-        const taskMonthYear = scheduled.getFullYear() * 12 + scheduled.getMonth();
-        const currentMonthYear = now.getFullYear() * 12 + now.getMonth();
-        const isPastMonth = taskMonthYear < currentMonthYear;
-
-        if (!completed) {
-            return isPastMonth ? 'MISS' : 'PENDING';
-        }
-
-        const diffInDays = Math.floor(Math.abs(completed - scheduled) / (1000 * 60 * 60 * 24));
-        const completedMonthYear = completed.getFullYear() * 12 + completed.getMonth();
-        if (completedMonthYear > taskMonthYear) return 'MISS';
-
-        return diffInDays <= 7 ? 'MEET' : 'MISS';
+    const showToast = (message, type = 'success') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 3000);
     };
 
     useEffect(() => {
         fetchInitialData();
     }, []);
 
-    const fetchInitialData = async () => {
+    async function fetchInitialData() {
         setLoading(true);
-        // Parallel fetch — all 4 primary requests happen at once
-        const start = getFirstDay(startMonth);
-        const end = getLastDay(endMonth);
-
-        const taskQuery = supabase
+        let taskQuery = supabase
             .from('maintenance_tasks')
             .select(`
-                id, asset_id, technician_id, type, scheduled_date, target_date, completed_date, reason,
+                id, asset_id, technician_id, type, scheduled_date, target_date, completed_date, reason, evident,
                 managed_assets!inner ( name, tid, kanwils ( name, id ) ),
                 technicians ( name, id )
-            `)
-            .gte('scheduled_date', start)
-            .lte('scheduled_date', end)
+            `);
+
+        if (!isAllPeriods) {
+            taskQuery = taskQuery.gte(dateFilterField, startDate).lte(dateFilterField, endDate);
+        }
+
+        taskQuery = taskQuery
             .order('scheduled_date', { ascending: true })
             .limit(rowLimit === 'all' ? 10000 : rowLimit);
 
@@ -188,142 +121,95 @@ export default function MaintenanceTracker({ typeFilter }) {
         }
         setTasks(filtered);
         setLoading(false);
-    };
+    }
 
-    const fetchTasks = async (startM = startMonth, endM = endMonth, kanwilId = filterKanwil, techId = filterTechnician, limitVal = rowLimit) => {
+    async function fetchTasks(startD = startDate, endD = endDate, kanwilId = filterKanwil, techId = filterTechnician, limitVal = rowLimit, allPeriodsOverride = isAllPeriods, field = dateFilterField) {
         setLoading(true);
-        const start = getFirstDay(startM);
-        const end = getLastDay(endM);
-
-        // Select only needed columns — avoid fetching notes, created_at, status, etc.
         let query = supabase
             .from('maintenance_tasks')
             .select(`
-                id,
-                asset_id,
-                technician_id,
-                type,
-                scheduled_date,
-                target_date,
-                completed_date,
-                reason,
-                managed_assets!inner ( 
-                    name, 
-                    tid, 
-                    kanwils ( name, id )
-                ),
+                id, asset_id, technician_id, type, scheduled_date, target_date, completed_date, reason, evident,
+                managed_assets!inner ( name, tid, kanwils ( name, id ) ),
                 technicians ( name, id )
-            `)
-            .gte('scheduled_date', start)
-            .lte('scheduled_date', end);
+            `);
 
-        // Apply type filter if provided
-        if (typeFilter) {
-            query = query.eq('type', typeFilter);
+        if (!allPeriodsOverride) {
+            query = query.gte(field, startD).lte(field, endD);
         }
 
-        query = query.order('scheduled_date', { ascending: true })
-            .limit(limitVal === 'all' ? 10000 : limitVal);
-
-        // Server-side technician filter — avoid fetching rows we'll discard
-        if (techId !== 'all') {
-            query = query.eq('technician_id', techId);
-        }
+        if (typeFilter) query = query.eq('type', typeFilter);
+        query = query.order('scheduled_date', { ascending: true }).limit(limitVal === 'all' ? 10000 : limitVal);
+        if (techId !== 'all') query = query.eq('technician_id', techId);
 
         const { data, error } = await query;
-
         if (error) {
             console.error(error);
             setTasks([]);
         } else {
             let filtered = data || [];
-            // Kanwil filter (must be client-side due to nested join)
             if (kanwilId !== 'all') {
                 filtered = filtered.filter(t => t.managed_assets?.kanwils?.id === kanwilId);
             }
             setTasks(filtered);
         }
         setLoading(false);
-    };
+    }
 
-    const updateTaskField = async (taskId, field, value) => {
+    async function updateTaskField(taskId, field, value) {
         const { error } = await supabase
             .from('maintenance_tasks')
             .update({ [field]: value === '' ? null : value })
             .eq('id', taskId);
-           if (error) {
-            console.error("Update failed:", error);
+        if (error) {
             alert(`Gagal update database: ${error.message}`);
         } else {
-            // Update local state to reflect change immediately
             setTasks(prev => prev.map(t => t.id === taskId ? { ...t, [field]: value } : t));
+            if (selectedTask?.id === taskId) {
+                setSelectedTask(prev => ({ ...prev, [field]: value }));
+            }
             setModifiedTaskIds(prev => new Set(prev).add(taskId));
         }
+    }
+
+    const handleRowClick = (task) => {
+        setSelectedTask(task);
     };
 
     const requestSort = (key, direction = null) => {
         if (!direction) {
             direction = (sortConfig.key === key && sortConfig.direction === 'asc') ? 'desc' : 'asc';
         }
-        if (direction === 'clear') {
-            setSortConfig({ key: null, direction: 'asc' });
-        } else {
-            setSortConfig({ key, direction });
-        }
-        setContextMenu({ ...contextMenu, visible: false });
+        setSortConfig(direction === 'clear' ? { key: null, direction: 'asc' } : { key, direction });
     };
 
     const handleContextMenu = (e, key) => {
         e.preventDefault();
-        setContextMenu({
-            visible: true,
-            x: e.clientX,
-            y: e.clientY,
-            key: key
-        });
+        setContextMenu({ visible: true, x: e.clientX, y: e.clientY, key });
     };
 
     useEffect(() => {
-        const handleClick = () => setContextMenu({ ...contextMenu, visible: false });
+        const handleClick = () => setContextMenu(prev => ({ ...prev, visible: false }));
         window.addEventListener('click', handleClick);
         return () => window.removeEventListener('click', handleClick);
-    }, [contextMenu]);
+    }, []);
 
-    const updateTaskTarget = async (taskId, date) => {
-        updateTaskField(taskId, 'target_date', date);
-    };
-
-    const updateTaskReason = async (taskId, reason) => {
-        updateTaskField(taskId, 'reason', reason);
-    };
-
-    // Debounced search — avoids re-filtering on every keystroke
     const [debouncedSearch, setDebouncedSearch] = useState('');
     useEffect(() => {
         const timer = setTimeout(() => setDebouncedSearch(searchTerm), 250);
         return () => clearTimeout(timer);
     }, [searchTerm]);
 
-    // Single pass: compute filteredTasks + meetCount + missCount + chartData all at once
-    const MONTH_NAMES = ['JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI', 'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER'];
-
-    const { filteredTasks, meetCount, missCount, pendingCount, chartData } = useMemo(() => {
-        // Step 1: Search filter
+    const stats = useMemo(() => {
         const search = debouncedSearch.toLowerCase();
-        let filtered = search
-            ? tasks.filter(t =>
-                t.managed_assets?.name?.toLowerCase().includes(search) ||
-                t.managed_assets?.tid?.toString().toLowerCase().includes(search) ||
-                t.technicians?.name?.toLowerCase().includes(search)
-            )
-            : tasks;
+        let filtered = search ? tasks.filter(t => t.managed_assets?.name?.toLowerCase().includes(search) || t.managed_assets?.tid?.toString().toLowerCase().includes(search) || t.technicians?.name?.toLowerCase().includes(search)) : tasks;
 
-        // Step 2: Sorting
+        if (filterSla !== 'all') {
+            filtered = filtered.filter(t => getPerformanceStatus(t) === filterSla);
+        }
+
         if (sortConfig.key) {
             filtered = [...filtered].sort((a, b) => {
                 let aVal, bVal;
-
-                // Handle nested keys or calculated keys
                 switch (sortConfig.key) {
                     case 'tid': aVal = a.managed_assets?.tid; bVal = b.managed_assets?.tid; break;
                     case 'site': aVal = a.managed_assets?.name; bVal = b.managed_assets?.name; break;
@@ -332,891 +218,320 @@ export default function MaintenanceTracker({ typeFilter }) {
                     case 'status': aVal = getPerformanceStatus(a); bVal = getPerformanceStatus(b); break;
                     default: aVal = a[sortConfig.key]; bVal = b[sortConfig.key];
                 }
-
                 if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
                 if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
                 return 0;
             });
         }
 
-        // Step 3: Single pass over filtered tasks for stats + chart
         let meet = 0, miss = 0, pending = 0;
         const monthMap = {};
+        const MONTH_NAMES = ['JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI', 'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER'];
 
-        for (let i = 0; i < tasks.length; i++) {
-            const t = tasks[i];
+        tasks.forEach(t => {
             const perf = getPerformanceStatus(t);
-            if (perf === 'MEET') meet++;
-            else if (perf === 'MISS') miss++;
-            else pending++;
-
+            if (perf === 'MEET') meet++; else if (perf === 'MISS') miss++; else pending++;
             if (t.scheduled_date) {
                 const ym = t.scheduled_date.slice(0, 7);
                 if (!monthMap[ym]) monthMap[ym] = { meet: 0, miss: 0, pending: 0, total: 0 };
                 monthMap[ym].total++;
-                if (perf === 'MEET') monthMap[ym].meet++;
-                else if (perf === 'MISS') monthMap[ym].miss++;
-                else monthMap[ym].pending++;
+                if (perf === 'MEET') monthMap[ym].meet++; else if (perf === 'MISS') monthMap[ym].miss++; else monthMap[ym].pending++;
             }
-        }
+        });
 
         const chart = Object.keys(monthMap).sort().map(ym => {
             const d = monthMap[ym];
             const total = d.total || 1;
-            const monthIdx = parseInt(ym.split('-')[1], 10) - 1;
             return {
-                name: MONTH_NAMES[monthIdx] || ym,
-                'IN SLA': Math.round((d.meet / total) * 100),
-                'OUT SLA': Math.round((d.miss / total) * 100),
-                'IN PROGRESS': Math.round((d.pending / total) * 100),
-                meetRaw: d.meet,
-                missRaw: d.miss,
-                pendingRaw: d.pending,
-                totalRaw: d.total
+                name: MONTH_NAMES[parseInt(ym.split('-')[1]) - 1] || ym,
+                'IN SLA': Math.round((d.meet / total) * 100), 'OUT SLA': Math.round((d.miss / total) * 100), 'IN PROGRESS': Math.round((d.pending / total) * 100),
+                meetRaw: d.meet, missRaw: d.miss, pendingRaw: d.pending, totalRaw: d.total
             };
         });
 
         return { filteredTasks: filtered, meetCount: meet, missCount: miss, pendingCount: pending, chartData: chart };
-    }, [tasks, debouncedSearch]);
+    }, [tasks, debouncedSearch, sortConfig]);
 
-    const [viewMode, setViewMode] = useState('table');
-
-    const handleExcelUpload = async (e) => {
+    async function handleExcelUpload(e) {
         const file = e.target.files[0];
         if (!file) return;
-
         setLoading(true);
         try {
             const data = await parseExcelFile(file);
-
-            // 1. Initial Mappings
-            const { data: existingTasks } = await supabase.from('maintenance_tasks').select('id, asset_id, type, period, scheduled_date, completed_date');
             const { data: currentAssets } = await supabase.from('managed_assets').select('id, tid');
+            const { data: existingTasks } = await supabase.from('maintenance_tasks').select('id, asset_id, scheduled_date, completed_date');
+            
+            const assetMap = {}; currentAssets?.forEach(a => assetMap[a.tid?.toString()?.toUpperCase()] = a.id);
+            const existingMap = {}; existingTasks?.forEach(t => existingMap[`${t.asset_id}_${t.scheduled_date}`] = { id: t.id, completed_date: t.completed_date });
+            const techMap = {}; technicians.forEach(t => techMap[t.name?.toUpperCase()] = t.id);
 
-            const assetMap = {};
-            currentAssets?.forEach(a => assetMap[a.tid?.toString()?.toUpperCase()] = a.id);
-
-            const existingMap = {};
-            existingTasks?.forEach(t => {
-                const key = `${t.asset_id}_${t.scheduled_date}`;
-                existingMap[key] = { id: t.id, completed_date: t.completed_date };
-            });
-
-            const techMap = {};
-            technicians.forEach(t => techMap[t.name?.toUpperCase()] = t.id);
-
-            // 2. AUTO-PROVISION MISSING ASSETS
             const missingTids = new Map();
             data.forEach(item => {
                 const tid = item['TID']?.toString()?.toUpperCase();
-                if (tid && !assetMap[tid]) {
-                    missingTids.set(tid, item['LOKASI'] || item['SITE'] || 'Auto-Provisioned Site');
-                }
+                if (tid && !assetMap[tid]) missingTids.set(tid, item['LOKASI'] || item['SITE'] || 'Auto-Provisioned Site');
             });
 
             if (missingTids.size > 0) {
-                const newAssets = Array.from(missingTids.entries()).map(([tid, name]) => ({
-                    tid,
-                    name,
-                    kanwil_id: null // To be filled manually later
-                }));
-
-                const { data: provisioned, error: pErr } = await supabase
-                    .from('managed_assets')
-                    .insert(newAssets)
-                    .select('id, tid');
-
-                if (!pErr && provisioned) {
-                    provisioned.forEach(a => assetMap[a.tid?.toString()?.toUpperCase()] = a.id);
-                }
+                const newAssets = Array.from(missingTids.entries()).map(([tid, name]) => ({ tid, name }));
+                const { data: provisioned } = await supabase.from('managed_assets').insert(newAssets).select('id, tid');
+                provisioned?.forEach(a => assetMap[a.tid?.toString()?.toUpperCase()] = a.id);
             }
 
-            // 3. PROCESS MAINTENANCE RECORDS
-            const newRecords = [];
-            const updateRecords = [];
-            const invalidRecords = [];
+            const newRecords = [], updateRecords = [], invalidRecords = [];
             let skipCount = 0;
             const createdTechNames = new Set();
 
             for (const item of data) {
-                const techNameRaw = item['TEKNISI'] || item['PELAKSANA'];
-                const pelaksana = techNameRaw?.toString()?.trim()?.toUpperCase();
                 const tid = item['TID']?.toString()?.toUpperCase();
-                const typeRaw = item['TYPE'] || item['STATUS TYPE'] || '';
-                const type = typeRaw.toString().toUpperCase().includes('CM') ? 'CM' : 'PM';
-                const siteName = item['LOKASI'] || item['SITE'] || 'Unknown Site';
-
+                const assetId = assetMap[tid];
                 const rawJadwal = item['JADWAL'] || item['SCHEDULED DATE'] || item['PLAN'];
                 const scheduledDate = rawJadwal ? getIsoDate(rawJadwal) : null;
 
-                const rawStatus = item['STATUS'] || item['KUNJUNGAN'] || item['TANGGAL KUNJUNGAN'] || item['VISIT DATE'] || item['DATE'] || item['TANGGAL'];
-                const visitDate = getIsoDate(rawStatus);
-
-                const rawTarget = item['TARGET'] || item['TARGET DATE'] || item['TARGET KUNJUNGAN'];
-                const targetDate = rawTarget ? getIsoDate(rawTarget) : null;
-
-                const reason = item['REASON'] || item['ALASAN'] || item['KETERANGAN SLA'] || '';
-
-                const assetId = assetMap[tid];
-
-                // ═══ VALIDATION (Now with Auto-Provisioning, assetId should exist) ═══
                 if (!tid || !assetId || !scheduledDate) {
-                    invalidRecords.push({
-                        tid_preview: tid || 'MISSING',
-                        site_preview: siteName,
-                        scheduled_date: scheduledDate || 'INVALID',
-                        reason: !tid ? 'TID EMPTY' : !assetId ? 'TID NOT FOUND' : 'DATE INVALID'
-                    });
+                    invalidRecords.push({ tid_preview: tid || 'MISSING', site_preview: item['LOKASI'] || item['SITE'] || 'Unknown', reason: !tid ? 'TID EMPTY' : !assetId ? 'TID NOT FOUND' : 'DATE INVALID' });
                     continue;
                 }
 
+                const techNameRaw = item['TEKNISI'] || item['PELAKSANA'];
+                const pelaksana = techNameRaw?.toString()?.trim()?.toUpperCase();
                 let techId = techMap[pelaksana] || null;
                 if (!techId && pelaksana && !createdTechNames.has(pelaksana)) {
-                    const { data: newTech, error: techErr } = await supabase
-                        .from('technicians')
-                        .insert([{ name: pelaksana, kanwil_id: null }])
-                        .select('id')
-                        .single();
-                    if (newTech && !techErr) {
-                        techId = newTech.id;
-                        techMap[pelaksana] = newTech.id;
-                    }
+                    const { data: newTech } = await supabase.from('technicians').insert([{ name: pelaksana }]).select('id').single();
+                    if (newTech) { techId = newTech.id; techMap[pelaksana] = newTech.id; }
                     createdTechNames.add(pelaksana);
-                } else if (!techId && pelaksana) {
-                    techId = techMap[pelaksana] || null;
                 }
 
-                const taskPeriod = scheduledDate.slice(0, 7);
-                const taskData = {
-                    asset_id: assetId,
-                    technician_id: techId,
-                    type,
-                    scheduled_date: scheduledDate,
-                    completed_date: visitDate,
-                    period: taskPeriod,
-                    status: visitDate ? 'completed' : 'pending',
-                    target_date: targetDate,
-                    reason: reason,
-                    notes: `Imported: ${pelaksana || 'Unknown'}`,
-                    tid_preview: tid,
-                    site_preview: siteName,
-                    tech_preview: pelaksana || 'Unassigned',
+                const visitDate = getIsoDate(item['STATUS'] || item['TANGGAL KUNJUNGAN']);
+                const type = (item['TYPE'] || '').toString().toUpperCase().includes('CM') ? 'CM' : 'PM';
+                const taskData = { 
+                    asset_id: assetId, 
+                    technician_id: techId, 
+                    type, 
+                    scheduled_date: scheduledDate, 
+                    period: scheduledDate.slice(0, 7),
+                    target_date: getIsoDate(item['TARGET'] || item['TARGET DATE'] || item['TGL TARGET']), 
+                    reason: item['REASON'] || '',
+                    tid_preview: tid, 
+                    site_preview: item['LOKASI'] || item['SITE'] || 'Unknown', 
+                    tech_preview: pelaksana || 'Unassigned', 
                     is_new_asset: missingTids.has(tid)
                 };
 
-                // User requested key: TID (AssetID) + Scheduled Date
-                const key = `${assetId}_${scheduledDate}`;
-                const existing = existingMap[key];
-
-                if (existing) {
-                    const existingDate = existing.completed_date || null;
-                    const newDate = visitDate || null;
-
-                    if (existingDate !== newDate) {
-                        updateRecords.push({ ...taskData, id: existing.id });
-                    } else {
-                        skipCount++;
-                    }
+                // Only update visit date if provided, prevent nullifying existing data
+                if (visitDate) {
+                    taskData.completed_date = visitDate;
+                    taskData.status = 'completed';
                 } else {
-                    newRecords.push(taskData);
+                    taskData.status = 'pending';
+                }
+
+                const existing = existingMap[`${assetId}_${scheduledDate}`];
+                if (existing) {
+                    if (existing.completed_date !== visitDate) updateRecords.push({ ...taskData, id: existing.id }); else skipCount++;
+                } else newRecords.push(taskData);
+            }
+
+            setImportData({ newRecords, updateRecords, invalidRecords, skipCount, provisionedCount: missingTids.size, totalRows: data.length, openCount: [...newRecords, ...updateRecords].filter(r => !r.completed_date).length, closedCount: [...newRecords, ...updateRecords].filter(r => r.completed_date).length });
+            setIsPreviewModalOpen(true);
+        } catch (err) { console.error(err); alert('Gagal memproses file Excel.'); }
+        setLoading(false); e.target.value = '';
+    }
+
+    async function handleConfirmImport() {
+        setIsSaving(true);
+        const allRecords = [...importData.newRecords, ...importData.updateRecords].map(({ tid_preview, site_preview, tech_preview, is_new_asset, ...rest }) => rest);
+        const { error } = await supabase.from('maintenance_tasks').upsert(allRecords);
+        if (error) {
+            console.error(error);
+            showToast(`Gagal Import: ${error.message}`, 'error');
+        } else { 
+            setIsPreviewModalOpen(false); 
+            fetchInitialData();
+            showToast('Data berhasil disinkronisasi!');
+        }
+        setIsSaving(false);
+    }
+
+    async function handleAddTask(e) {
+        e.preventDefault(); setIsSaving(true);
+        const taskToInsert = { ...newTask, period: newTask.scheduled_date.slice(0, 7), status: newTask.completed_date ? 'completed' : 'pending' };
+        const { error } = await supabase.from('maintenance_tasks').insert([taskToInsert]);
+        if (error) alert(`Error: ${error.message}`); else { setIsModalOpen(false); fetchTasks(); }
+        setIsSaving(false);
+    }
+
+    async function handleExportTargetTemplate() {
+        const exportData = stats.filteredTasks.map(t => ({ 
+            'TID': t.managed_assets?.tid || 'N/A', 
+            'SCHEDULED DATE': formatDate(t.scheduled_date), 
+            'TARGET DATE': t.target_date ? formatDate(t.target_date) : '' 
+        }));
+        await exportToExcel(exportData, `Template_Target_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    }
+
+    async function handleTargetExcelUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        setLoading(true);
+        try {
+            const data = await parseExcelFile(file);
+            const updates = [];
+            const taskMap = {}; tasks.forEach(t => taskMap[`${t.managed_assets?.tid?.toString()?.toUpperCase()}_${t.scheduled_date}`] = t);
+
+            for (const item of data) {
+                const tid = item['TID']?.toString()?.trim()?.toUpperCase();
+                const schedDate = getIsoDate(item['SCHEDULED DATE'] || item['TGL JADWAL']);
+                const newTargetDate = getIsoDate(item['TARGET DATE'] || item['TGL TARGET'] || item['TARGET']);
+                if (!tid || !schedDate || !newTargetDate) continue;
+                const existingTask = taskMap[`${tid}_${schedDate}`];
+                if (existingTask && existingTask.target_date !== newTargetDate) {
+                    updates.push({ 
+                        id: existingTask.id, 
+                        asset_id: existingTask.asset_id,
+                        type: existingTask.type,
+                        scheduled_date: schedDate,
+                        period: schedDate.slice(0, 7),
+                        tid, 
+                        site: existingTask.managed_assets?.name, 
+                        oldTarget: existingTask.target_date, 
+                        newTarget: newTargetDate 
+                    });
                 }
             }
 
-            setImportData({
-                newRecords,
-                updateRecords,
-                invalidRecords,
-                skipCount,
-                provisionedCount: missingTids.size,
-                totalRows: data.length + 1, // +1 for Header
-                openCount: [...newRecords, ...updateRecords].filter(r => !r.completed_date).length,
-                closedCount: [...newRecords, ...updateRecords].filter(r => r.completed_date).length
-            });
-            setIsPreviewModalOpen(true);
-        } catch (err) {
-            console.error(err);
-            alert('Gagal memproses file Excel.');
-        }
+            if (updates.length > 0) { setTargetUpdateData({ updates, count: updates.length }); setIsTargetPreviewModalOpen(true); } else alert("Tidak ada pembaruan target.");
+        } catch (err) { console.error(err); }
         setLoading(false); e.target.value = '';
-    };
+    }
 
-    const confirmImport = async () => {
-        const totalToProcess = importData.newRecords.length + importData.updateRecords.length;
-        if (totalToProcess === 0) { setIsPreviewModalOpen(false); return; }
+    async function handleConfirmTargetUpdate() {
         setIsSaving(true);
-
-        // Prepare all records for upsert
-        const allRecords = [...importData.newRecords, ...importData.updateRecords].map(({ tid_preview, site_preview, tech_preview, is_new_asset, ...rest }) => ({
-            ...rest,
-            period: rest.period || new Date().toISOString().slice(0, 7)
+        const updateRows = targetUpdateData.updates.map(u => ({ 
+            id: u.id, 
+            asset_id: u.asset_id,
+            type: u.type,
+            scheduled_date: u.scheduled_date,
+            period: u.period,
+            target_date: u.newTarget 
         }));
-
-        // Supabase Upsert handles both insert (no ID) and update (with ID)
-        const { error } = await supabase.from('maintenance_tasks').upsert(allRecords);
-
+        const { error } = await supabase.from('maintenance_tasks').upsert(updateRows);
         if (error) {
-            alert(`Error: ${error.message}`);
-        } else {
-            setIsPreviewModalOpen(false);
-            fetchInitialData();
-            alert(`Berhasil memproses ${allRecords.length} data (${importData.newRecords.length} baru, ${importData.updateRecords.length} update). ${importData.skipCount} data dilewati.`);
+            console.error(error);
+            showToast(`Gagal Update: ${error.message}`, 'error');
+        } else { 
+            setIsTargetPreviewModalOpen(false); 
+            fetchInitialData(); 
+            showToast('Target berhasil diperbarui!');
         }
         setIsSaving(false);
-    };
+    }
 
-
-
-    const handleAddTask = async (e) => {
-        e.preventDefault(); setIsSaving(true);
-
-        const taskToInsert = {
-            asset_id: newTask.asset_id,
-            technician_id: newTask.technician_id,
-            type: newTask.type,
-            period: newTask.scheduled_date ? newTask.scheduled_date.slice(0, 7) : new Date().toISOString().slice(0, 7),
-            scheduled_date: newTask.scheduled_date,
-            target_date: newTask.target_date || null,
-            completed_date: newTask.completed_date || null,
-            status: newTask.completed_date ? 'completed' : 'pending',
-            reason: newTask.reason || '',
-            notes: newTask.notes || ''
-        };
-
-        const { error } = await supabase.from('maintenance_tasks').insert([taskToInsert]);
-        if (error) { alert(`Error: ${error.message}`); } else {
-            setIsModalOpen(false);
-            fetchTasks(startMonth, endMonth);
-        }
-        setIsSaving(false);
-    };
+    async function handleExportPremiumExcel() {
+        const exportData = stats.filteredTasks.map(t => {
+            let aging = '---';
+            if (t.scheduled_date && t.target_date) aging = Math.round((new Date(t.target_date) - new Date(t.scheduled_date)) / (1000 * 60 * 60 * 24));
+            return {
+                'TID': t.managed_assets?.tid, 'LOKASI': t.managed_assets?.name, 'TYPE': t.type, 'WILAYAH': t.managed_assets?.kanwils?.name, 'TGL JADWAL': formatDate(t.scheduled_date), 'TGL TARGET': formatDate(t.target_date), 'AGING (HARI)': aging, 'TEKNISI': t.technicians?.name, 'SLA STATUS': getPerformanceStatus(t), 'TGL KUNJUNGAN': formatDate(t.completed_date), 'REASON': t.reason || (getPerformanceStatus(t) === 'MEET' ? 'DONE' : '-')
+            };
+        });
+        await exportToExcel(exportData, `Maintenance_Log_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    }
 
     return (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4 max-w-full mx-auto min-h-screen selection:bg-blue-100 bg-slate-50">
-            <input type="file" ref={fileInputRef} onChange={handleExcelUpload} accept=".xlsx, .xls" className="hidden" />
-
-            {/* ═══ Header ═══ */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm mb-4 overflow-hidden">
-                {/* Top Row: Title + Stats + Actions */}
-                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 px-6 py-5">
-                    {/* Title */}
-                    <div className="flex items-center gap-4">
-                        <div className="w-11 h-11 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-                            <FiActivity size={20} />
-                        </div>
-                        <div>
-                            <h1 className="text-lg font-[950] text-slate-900 leading-none tracking-tight">
-                                {typeFilter ? `Monthly ${typeFilter}` : 'Performance Ops'}
-                            </h1>
-                            <p className="text-[9px] font-bold text-slate-400 tracking-[0.15em] mt-1 uppercase">
-                                {typeFilter ? `${typeFilter} SLA TRACKING` : 'SLA TRACKING PORTAL'}
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Stats Chips */}
-                    {/* Stats Dashboard */}
-                    <div className="flex items-center gap-4">
-                        <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl px-6 py-3 flex flex-col items-center min-w-[120px] shadow-sm">
-                            <span className="text-[9px] font-black text-emerald-600 uppercase tracking-[0.15em] mb-1">IN SLA</span>
-                            <span className="text-2xl font-[950] text-emerald-700 leading-none tabular-nums">{meetCount}</span>
-                        </div>
-                        <div className="bg-rose-50/50 border border-rose-100 rounded-2xl px-6 py-3 flex flex-col items-center min-w-[120px] shadow-sm">
-                            <span className="text-[9px] font-black text-rose-600 uppercase tracking-[0.15em] mb-1">OUT SLA</span>
-                            <span className="text-2xl font-[950] text-rose-700 leading-none tabular-nums">{missCount}</span>
-                        </div>
-                        <div className="bg-amber-50/50 border border-amber-100 rounded-2xl px-6 py-3 flex flex-col items-center min-w-[120px] shadow-sm">
-                            <span className="text-[9px] font-black text-amber-600 uppercase tracking-[0.15em] mb-1">IN PROGRESS</span>
-                            <span className="text-2xl font-[950] text-amber-700 leading-none tabular-nums">{pendingCount}</span>
-                        </div>
-                        <div className="bg-slate-50 border border-slate-200 rounded-2xl px-6 py-3 flex flex-col items-center min-w-[120px] shadow-sm">
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.15em] mb-1">TOTAL DATA</span>
-                            <span className="text-2xl font-[950] text-slate-900 leading-none tabular-nums">{tasks.length}</span>
-                        </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex items-center gap-2">
-                        <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-50 transition-all">
-                            <FiSearch size={13} className="text-slate-300" />
-                            <input type="text" placeholder="Cari TID, Site, Teknisi..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-transparent border-none outline-none text-[10px] font-bold text-slate-700 w-40 ml-2 placeholder:text-slate-300" />
-                        </div>
-                        <div className="w-px h-6 bg-slate-200" />
-                        <button 
-                            onClick={() => {
-                                if (devMode) {
-                                    if (window.confirm("Kamu yakin akan mengubah seluruh data?")) {
-                                        setDevMode(false);
-                                        setModifiedTaskIds(new Set());
-                                    }
-                                } else {
-                                    setDevMode(true);
-                                }
-                            }} 
-                            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-black text-[9px] tracking-wider uppercase transition-all shadow-sm ${devMode ? 'bg-amber-100 text-amber-600 border border-amber-200 ring-2 ring-amber-50' : 'bg-slate-50 text-slate-400 border border-slate-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200'}`}
-                            title="Toggle Developer & Maintenance Mode"
-                        >
-                            <FiEdit3 size={13} /> {devMode ? 'Exit Dev' : 'Dev Mode'}
-                        </button>
-                        <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-black text-[9px] tracking-wider uppercase transition-all shadow-sm shadow-blue-100 active:scale-95">
-                            <FiPlus size={13} /> Jadwal
-                        </button>
-                        <button onClick={() => fileInputRef.current.click()} className="p-2 bg-slate-50 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-lg border border-slate-200 hover:border-blue-200 transition-all" title="Import Excel">
-                            <FiUpload size={14} />
-                        </button>
-                        <button
-                            onClick={async () => {
-                                const exportData = filteredTasks.map(t => {
-                                    // Calculate Aging for Excel
-                                    let aging = '---';
-                                    if (t.scheduled_date && t.target_date) {
-                                        const s = new Date(t.scheduled_date);
-                                        const target = new Date(t.target_date);
-                                        aging = Math.floor((target - s) / (1000 * 60 * 60 * 24));
-                                    }
-
-                                    return {
-                                        'TID': t.managed_assets?.tid || 'N/A',
-                                        'LOKASI': t.managed_assets?.name || 'Unknown',
-                                        'TYPE': t.type,
-                                        'WILAYAH': t.managed_assets?.kanwils?.name || 'Induk',
-                                        'TGL JADWAL': formatDate(t.scheduled_date),
-                                        'TGL TARGET': formatDate(t.target_date),
-                                        'AGING (HARI)': aging,
-                                        'TEKNISI': t.technicians?.name || 'Unassigned',
-                                        'SLA STATUS': getPerformanceStatus(t),
-                                        'TGL KUNJUNGAN': formatDate(t.completed_date),
-                                        'REASON': t.reason || (getPerformanceStatus(t) === 'MEET' ? 'DONE' : '-')
-                                    };
-                                });
-                                await exportToExcel(exportData, `Maintenance_Log_${new Date().toISOString().slice(0, 10)}.xlsx`);
-                            }}
-                            className="p-2 bg-slate-50 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-lg border border-slate-200 hover:border-emerald-200 transition-all"
-                            title="Export Premium Excel"
-                        >
-                            <FiDownload size={14} />
-                        </button>
-                        <button onClick={() => setViewMode(viewMode === 'table' ? 'chart' : 'table')} className={`p-2 rounded-lg border transition-all ${viewMode === 'chart' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-slate-50 text-slate-400 hover:text-blue-600 border-slate-200 hover:border-blue-200'}`} title={viewMode === 'chart' ? 'Table View' : 'Chart View'}>
-                            {viewMode === 'chart' ? <FiList size={14} /> : <FiBarChart2 size={14} />}
-                        </button>
-                    </div>
-                </div>
-
-                {/* Bottom Row: Filters + Period */}
-                <div className="flex flex-wrap items-center gap-5 px-6 py-2.5 bg-slate-50/50 border-t border-slate-100">
-                    <div className="flex items-center gap-2">
-                        <FiMapPin size={12} className="text-slate-300" />
-                        <select value={filterKanwil} onChange={(e) => { setFilterKanwil(e.target.value); fetchTasks(startMonth, endMonth, e.target.value, filterTechnician); }} className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-[9px] font-bold text-slate-600 outline-none cursor-pointer hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all">
-                            <option value="all">Semua Wilayah</option>
-                            {kanwils.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
-                        </select>
-                    </div>
-                    <div className="w-px h-4 bg-slate-200" />
-                    <div className="flex items-center gap-2">
-                        <FiUser size={12} className="text-slate-300" />
-                        <select value={filterTechnician} onChange={(e) => { setFilterTechnician(e.target.value); fetchTasks(startMonth, endMonth, filterKanwil, e.target.value); }} className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-[9px] font-bold text-slate-600 outline-none cursor-pointer min-w-[140px] hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all">
-                            <option value="all">Semua Teknisi</option>
-                            {technicians.filter(t => filterKanwil === 'all' || t.kanwil_id === filterKanwil).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                        </select>
-                    </div>
-                    <div className="w-px h-4 bg-slate-200" />
-                    <div className="flex items-center gap-2">
-                        <FiList size={12} className="text-slate-300" />
-                        <select value={rowLimit} onChange={(e) => {
-                            const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value);
-                            setRowLimit(val);
-                            fetchTasks(startMonth, endMonth, filterKanwil, filterTechnician, val);
-                        }} className="bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-[9px] font-bold text-slate-600 outline-none cursor-pointer hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all">
-                            <option value={50}>Tampilkan 50</option>
-                            <option value={100}>Tampilkan 100</option>
-                            <option value={200}>Tampilkan 200</option>
-                            <option value="all">Tampilkan Semua</option>
-                        </select>
-                    </div>
-                    <div className="flex items-center gap-2 ml-auto">
-                        <FiCalendar size={12} className="text-slate-300" />
-                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Periode</span>
-                        <div className="flex items-center bg-white rounded-lg border border-slate-200 overflow-hidden">
-                            <input type="month" value={startMonth} onChange={(e) => { setStartMonth(e.target.value); fetchTasks(e.target.value, endMonth, filterKanwil, filterTechnician); }} className="bg-transparent border-none px-3 py-1.5 text-[9px] font-bold text-slate-600 outline-none w-32" />
-                            <div className="w-px h-4 bg-slate-200" />
-                            <input type="month" value={endMonth} onChange={(e) => { setEndMonth(e.target.value); fetchTasks(startMonth, e.target.value, filterKanwil, filterTechnician); }} className="bg-transparent border-none px-3 py-1.5 text-[9px] font-bold text-slate-600 outline-none w-32" />
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {viewMode === 'table' ? (
-                /* Excel-Style Table */
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse table-fixed">
-                            <thead className="bg-slate-100/50 text-slate-400 border-b border-slate-200">
-                                <tr className="text-[9px] font-black tracking-widest uppercase align-middle cursor-pointer">
-                                    <th className="px-3 py-3 border-r border-slate-200 text-center w-12 bg-slate-200/20">#</th>
-                                    {[
-                                        { label: 'TID', key: 'tid', w: 'w-24' },
-                                        { label: 'SITE INFORMATION', key: 'site', w: 'w-56' },
-                                        { label: 'CATEGORY', key: 'type', w: 'w-24 text-center' },
-                                        { label: 'REGION', key: 'kanwil', w: 'w-32' },
-                                        { label: 'SCHEDULED', key: 'scheduled_date', w: 'w-28 text-center' },
-                                        { label: 'TARGET', key: 'target_date', w: 'w-28 text-center' },
-                                        { label: 'AGING', key: 'aging', w: 'w-20 text-center' },
-                                        { label: 'TECHNICIAN', key: 'tech', w: 'w-44' },
-                                        { label: 'SLA STATUS', key: 'status', w: 'w-24 text-center' },
-                                        { label: 'KUNJUNGAN', key: 'completed_date', w: 'w-28 text-center' },
-                                        { label: 'REASON', key: 'reason', w: 'w-40 text-center' }
-                                    ].map(col => (
-                                        <th 
-                                            key={col.key}
-                                            onClick={() => requestSort(col.key)}
-                                            onContextMenu={(e) => handleContextMenu(e, col.key)}
-                                            className={`px-3 py-3 border-r border-slate-200 ${col.w} hover:bg-slate-200/50 transition-colors relative group select-none`}
-                                        >
-                                            <div className="flex items-center justify-between gap-1">
-                                                <span>{col.label}</span>
-                                                {sortConfig.key === col.key ? (
-                                                    sortConfig.direction === 'asc' ? <FiChevronUp className="text-blue-500" /> : <FiChevronDown className="text-blue-500" />
-                                                ) : <FiChevronDown className="text-slate-200 opacity-0 group-hover:opacity-100 transition-opacity" />}
-                                            </div>
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-200">
-                                {loading ? (
-                                    Array(10).fill(0).map((_, i) => <tr key={i} className="h-10 animate-pulse"><td colSpan="9" className="px-3"><div className="h-2 bg-slate-50 rounded w-full opacity-60" /></td></tr>)
-                                ) : filteredTasks.length === 0 ? (
-                                    <tr><td colSpan="9" className="py-32 text-center text-[10px] font-black text-slate-200 uppercase tracking-[0.5em] italic">Zero Records Found</td></tr>
-                                ) : (
-                                    filteredTasks.map((task, idx) => {
-                                        const perf = getPerformanceStatus(task);
-                                        return (
-                                            <tr key={task.id} className={`text-[10px] uppercase font-bold hover:bg-slate-50 transition-colors ${perf === 'MISS' ? 'bg-rose-50/20' : perf === 'MEET' ? 'bg-emerald-50/10' : ''}`}>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-center bg-slate-100/10 text-slate-300 font-mono text-[9px]">{idx + 1}</td>
-                                                <td className="px-3 py-2 border-r border-slate-100 font-mono text-blue-500 bg-blue-50/10 text-[9px]">
-                                                    {devMode ? (
-                                                        <select 
-                                                            value={task.asset_id || ''} 
-                                                            onChange={(e) => updateTaskField(task.id, 'asset_id', e.target.value)}
-                                                            className={`bg-white border rounded px-1 py-0.5 text-[8px] font-black outline-none w-full ${modifiedTaskIds.has(task.id) ? 'text-emerald-500 border-emerald-200' : 'border-slate-200'}`}
-                                                        >
-                                                            <option value="">SELECT TID...</option>
-                                                            {assets.map(a => <option key={a.id} value={a.id}>{a.tid}</option>)}
-                                                        </select>
-                                                    ) : (
-                                                        task.managed_assets?.tid || '---'
-                                                    )}
-                                                </td>
-                                                <td className="px-3 py-2 border-r border-slate-100 truncate pr-4 text-slate-800 tracking-tight">{task.managed_assets?.name}</td>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-center">
-                                                    {devMode ? (
-                                                        <select 
-                                                            value={task.type} 
-                                                            onChange={(e) => updateTaskField(task.id, 'type', e.target.value)}
-                                                            className={`bg-white border rounded px-1 py-0.5 text-[8px] font-black outline-none ${modifiedTaskIds.has(task.id) ? 'text-emerald-500 border-emerald-200' : 'border-slate-200'}`}
-                                                        >
-                                                            <option value="PM">PM</option>
-                                                            <option value="CM">CM</option>
-                                                        </select>
-                                                    ) : (
-                                                        <span className={`px-2 py-0.5 rounded text-[8px] font-black border ${task.type === 'PM' ? 'bg-indigo-50 text-indigo-500 border-indigo-100' : 'bg-rose-50 text-rose-500 border-rose-100'}`}>{task.type}</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-slate-400 text-[9px]">{task.managed_assets?.kanwils?.name || '---'}</td>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-center font-mono text-slate-500">
-                                                    {devMode ? (
-                                                        <input 
-                                                            type="date" 
-                                                            defaultValue={task.scheduled_date} 
-                                                            onBlur={(e) => updateTaskField(task.id, 'scheduled_date', e.target.value)}
-                                                            className={`bg-transparent border-none focus:bg-white focus:ring-1 focus:ring-blue-100 rounded px-1 py-1 text-[9px] font-mono outline-none w-full ${modifiedTaskIds.has(task.id) ? 'text-emerald-500 font-bold' : 'text-slate-600'}`}
-                                                        />
-                                                    ) : (
-                                                        formatDate(task.scheduled_date)
-                                                    )}
-                                                </td>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-center">
-                                                    <input 
-                                                        type="date"
-                                                        defaultValue={task.target_date || ''}
-                                                        onBlur={(e) => updateTaskTarget(task.id, e.target.value)}
-                                                        className="bg-transparent border-none focus:bg-white focus:ring-1 focus:ring-blue-100 rounded px-1 py-1 text-[9px] font-mono text-blue-500 transition-all outline-none"
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-center font-bold text-[9px] text-slate-500">
-                                                    {(() => {
-                                                        if (!task.scheduled_date || !task.target_date) return '---';
-                                                        const s = new Date(task.scheduled_date);
-                                                        const t = new Date(task.target_date);
-                                                        const diff = Math.floor((t - s) / (1000 * 60 * 60 * 24));
-                                                        return <span className={diff > 7 ? 'text-rose-500' : 'text-emerald-500'}>{diff} H</span>;
-                                                    })()}
-                                                </td>
-                                                <td className="px-4 py-2 border-r border-slate-100 pr-4">
-                                                    {devMode ? (
-                                                        <select 
-                                                            value={task.technician_id || ''} 
-                                                            onChange={(e) => updateTaskField(task.id, 'technician_id', e.target.value)}
-                                                            className={`bg-white border rounded px-1 py-0.5 text-[9px] font-bold outline-none w-full ${modifiedTaskIds.has(task.id) ? 'text-emerald-500 border-emerald-200' : 'border-slate-200 text-slate-600'}`}
-                                                        >
-                                                            <option value="">UNASSIGNED</option>
-                                                            {technicians.map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
-                                                        </select>
-                                                    ) : (
-                                                        <div className="flex items-center gap-2">
-                                                            <div className="w-5 h-5 bg-slate-100 rounded-md border border-slate-200 flex items-center justify-center text-slate-400 text-[8px] font-black">{task.technicians?.name?.[0]}</div>
-                                                            <span className="truncate text-slate-600">{task.technicians?.name || 'UNASSIGNED'}</span>
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td className="px-3 py-2 text-center align-middle border-r border-slate-100">
-                                                    {perf === 'MEET' ? (
-                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500 text-white rounded-full text-[8px] font-black shadow-lg shadow-emerald-200"><FiCheckCircle size={10} /> MEET</span>
-                                                    ) : perf === 'MISS' ? (
-                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-500 text-white rounded-full text-[8px] font-black shadow-lg shadow-rose-200"><FiAlertCircle size={10} /> MISS</span>
-                                                    ) : (
-                                                        <span className="px-3 py-1 bg-slate-100 text-slate-300 rounded-full text-[8px] font-black">PENDING</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-3 py-2 border-r border-slate-100 text-center font-mono">
-                                                    {devMode ? (
-                                                        <input 
-                                                            type="date" 
-                                                            defaultValue={task.completed_date || ''} 
-                                                            onBlur={(e) => updateTaskField(task.id, 'completed_date', e.target.value)}
-                                                            className={`bg-transparent border-none focus:bg-white focus:ring-1 focus:ring-blue-100 rounded px-1 py-1 text-[9px] font-mono outline-none w-full ${modifiedTaskIds.has(task.id) ? 'text-emerald-500 font-bold' : 'text-slate-600'}`}
-                                                        />
-                                                    ) : task.completed_date ? (
-                                                        <span className="text-slate-700">{formatDate(task.completed_date)}</span>
-                                                    ) : (
-                                                        <span className="text-slate-200 italic text-[8px]">WAITING</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <input 
-                                                        type="text"
-                                                        defaultValue={task.reason || (perf === 'MEET' ? 'DONE' : '')}
-                                                        onBlur={(e) => updateTaskReason(task.id, e.target.value)}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') {
-                                                                e.target.blur();
-                                                            }
-                                                        }}
-                                                        className={`w-full bg-transparent border-none focus:bg-white focus:ring-1 focus:ring-blue-100 rounded px-1 py-1 text-[9px] transition-all placeholder:text-slate-200 ${
-                                                            (task.reason === 'DONE' || (!task.reason && perf === 'MEET')) 
-                                                            ? 'text-emerald-600 font-black' 
-                                                            : 'text-slate-500 italic font-medium'
-                                                        }`}
-                                                        placeholder="Add reason..."
-                                                    />
-                                                </td>
-                                            </tr>
-                                        );
-                                    })
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            ) : (
-                /* Chart View — Premium Design */
-                <div className="space-y-5">
-                    {/* Stat Cards Row - High Density */}
-                    <div className="grid grid-cols-4 gap-4">
-                        {(() => {
-                            const totalTasks = tasks.length;
-                            const totalMeet = tasks.filter(t => getPerformanceStatus(t) === 'MEET').length;
-                            const totalMiss = tasks.filter(t => getPerformanceStatus(t) === 'MISS').length;
-                            const totalPending = tasks.filter(t => getPerformanceStatus(t) === 'PENDING').length;
-                            const overallSla = totalTasks > 0 ? Math.round((totalMeet / (totalMeet + totalMiss || 1)) * 100) : 0;
-                            return [
-                                { label: 'Total Tasks', value: totalTasks, sub: 'Log Count', icon: <FiDatabase size={16} />, gradient: 'from-white to-slate-50', shadow: 'shadow-slate-100', isLight: true },
-                                { label: 'In SLA (Meet)', value: totalMeet, sub: `${totalTasks > 0 ? Math.round((totalMeet / totalTasks) * 100) : 0}% Yield`, icon: <FiCheckCircle size={16} />, gradient: 'from-blue-600 to-blue-800', shadow: 'shadow-blue-200' },
-                                { label: 'Out SLA (Miss)', value: totalMiss, sub: `${totalTasks > 0 ? Math.round((totalMiss / totalTasks) * 100) : 0}% Loss`, icon: <FiAlertCircle size={16} />, gradient: 'from-rose-600 to-rose-800', shadow: 'shadow-rose-200' },
-                                { label: 'Overall Rate', value: `${overallSla}%`, sub: 'Efficiency', icon: <FiActivity size={16} />, gradient: overallSla >= 85 ? 'from-emerald-600 to-emerald-800' : overallSla >= 60 ? 'from-amber-600 to-amber-700' : 'from-rose-600 to-rose-800', shadow: 'shadow-indigo-100' }
-                            ].map(card => (
-                                <div key={card.label} className={`relative overflow-hidden bg-gradient-to-br ${card.gradient} rounded-xl p-4 ${card.isLight ? 'text-slate-900 border border-slate-200' : 'text-white'} shadow-lg ${card.shadow} group hover:translate-y-[-2px] transition-all`}>
-                                    <div className={`absolute -right-2 -top-2 w-16 h-16 ${card.isLight ? 'bg-slate-200/20' : 'bg-white/5'} rounded-full` } />
-                                    <div className={`flex items-center gap-2 mb-2 ${card.isLight ? 'text-slate-400' : 'opacity-70'}`}>
-                                        {card.icon}
-                                        <span className="text-[8px] font-black uppercase tracking-[0.1em]">{card.label}</span>
-                                    </div>
-                                    <div className="flex items-baseline gap-2">
-                                        <div className="text-2xl font-[950] tracking-tighter leading-none">{card.value}</div>
-                                        <div className={`text-[7px] font-bold ${card.isLight ? 'text-slate-400' : 'opacity-40'} uppercase tracking-widest`}>{card.sub}</div>
-                                    </div>
-                                </div>
-                            ));
-                        })()}
-                    </div>
-
-                    {/* SLA Dashboard Section - Grid Layout for No-Scroll */}
-                    <div className="grid grid-cols-12 gap-5 h-[420px]">
-                        {/* Left: Performance Chart (8/12) */}
-                        <div className="col-span-8 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
-                            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-                                <div className="flex items-center gap-2.5">
-                                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-                                        <FiBarChart2 size={16} />
-                                    </div>
-                                    <div>
-                                        <h2 className="text-sm font-[950] text-slate-900 uppercase tracking-tighter">SLA Health Overview</h2>
-                                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Success Yield Trends</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-4 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
-                                    {[
-                                        { label: 'SUCCESS', color: 'bg-blue-500' },
-                                        { label: 'LOSS', color: 'bg-rose-500' },
-                                        { label: 'WORK', color: 'bg-lime-500' }
-                                    ].map(l => (
-                                        <div key={l.label} className="flex items-center gap-1.5">
-                                            <div className={`w-2 h-2 rounded-sm ${l.color}`} />
-                                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-tight">{l.label}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="flex-1 p-6 relative">
-                                {chartData.length === 0 ? (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-20">
-                                        <FiActivity size={32} />
-                                        <span className="text-[10px] font-black uppercase tracking-widest">Awaiting Data Pool</span>
-                                    </div>
-                                ) : (
-                                    <ResponsiveContainer width="100%" height={280}>
-                                        <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} barCategoryGap="25%">
-                                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                                            <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 900, fill: '#475569' }} axisLine={false} tickLine={false} />
-                                            <YAxis tick={{ fontSize: 8, fontWeight: 700, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} width={30} />
-                                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', fontSize: '10px', fontWeight: 800 }} cursor={{ fill: '#f8fafc', radius: 8 }} />
-                                            <Bar dataKey="IN SLA" fill="#3b82f6" radius={[6, 6, 0, 0]} />
-                                            <Bar dataKey="OUT SLA" fill="#f43f5e" radius={[6, 6, 0, 0]} />
-                                            <Bar dataKey="IN PROGRESS" fill="#84cc16" radius={[6, 6, 0, 0]} />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Right: Vertical Summary Pool (4/12) */}
-                        <div className="col-span-4 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
-                            <div className="px-6 py-5 bg-slate-900 text-white flex items-center justify-between">
-                                <div>
-                                    <h2 className="text-xs font-black uppercase tracking-widest">Yield Analysis</h2>
-                                    <p className="text-[7px] font-bold text-white/40 uppercase tracking-[0.2em] mt-0.5">Monthly Node Performance</p>
-                                </div>
-                                <FiActivity className="text-blue-400" />
-                            </div>
-                            <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50/50">
-                                {chartData.map(d => (
-                                    <div key={d.name} className="bg-white border border-slate-200 p-3 rounded-lg flex items-center justify-between hover:border-blue-300 transition-all group">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-9 h-9 bg-slate-50 rounded-lg flex flex-col items-center justify-center border border-slate-100 group-hover:bg-blue-50 transition-colors">
-                                                <span className="text-[9px] font-black text-slate-800 tracking-tighter leading-none">{d.name.split(' ')[0]}</span>
-                                                <span className="text-[7px] font-bold text-slate-400 tracking-tighter">{d.name.split(' ')[1]}</span>
-                                            </div>
-                                            <div>
-                                                <div className="text-[12px] font-[950] text-slate-900 tabular-nums">{d['IN SLA']}% <span className="text-[8px] text-slate-300 font-bold ml-1 uppercase">SLA</span></div>
-                                                <div className="flex items-center gap-3 mt-0.5">
-                                                    <div className="flex items-center gap-1">
-                                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                                                        <span className="text-[8px] font-black text-slate-400">{d.meetRaw}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-1">
-                                                        <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                                                        <span className="text-[8px] font-black text-slate-400">{d.missRaw}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-1">
-                                                        <div className="w-1.5 h-1.5 rounded-full bg-lime-500" />
-                                                        <span className="text-[8px] font-black text-slate-400">{d.pendingRaw}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className={`w-1.5 h-8 rounded-full ${parseInt(d['IN SLA']) >= 85 ? 'bg-emerald-500' : parseInt(d['IN SLA']) >= 60 ? 'bg-amber-500' : 'bg-rose-500'}`} />
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Modals - Optimized Layout */}
-            <AnimatePresence>
-                {isModalOpen && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white p-10 rounded-none w-full max-w-lg relative shadow-2xl border border-slate-200">
-                            <button onClick={() => setIsModalOpen(false)} className="absolute top-8 right-8 w-10 h-10 bg-slate-50 hover:bg-rose-50 text-slate-300 hover:text-rose-500 rounded-full flex items-center justify-center transition-all">✕</button>
-                            <h2 className="text-2xl font-[950] text-slate-900 mb-2 uppercase tracking-tighter">Inject Production Schedule</h2>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-10 border-b border-slate-50 pb-4">Internal Asset Log Sync</p>
-                            <form onSubmit={handleAddTask} className="space-y-6">
-                                <div className="space-y-2">
-                                    <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4">SOURCE TID / SITE</label>
-                                    <select required value={newTask.asset_id} onChange={(e) => setNewTask({ ...newTask, asset_id: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-200 text-[10px] font-black text-slate-700 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all">
-                                        <option value="">SELECT ASSET...</option>
-                                        {assets.map(a => <option key={a.id} value={a.id}>[{a.tid}] {a.name}</option>)}
-                                    </select>
-                                </div>
-                                <div className="grid grid-cols-2 gap-6">
-                                    <div className="space-y-2">
-                                        <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4">PLAN DATE</label>
-                                        <input required type="date" value={newTask.scheduled_date} onChange={(e) => setNewTask({ ...newTask, scheduled_date: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-200 text-[10px] font-black text-slate-700 outline-none" />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4 text-blue-500">TARGET DATE</label>
-                                        <input type="date" value={newTask.target_date} onChange={(e) => setNewTask({ ...newTask, target_date: e.target.value })} className="w-full bg-blue-50/30 p-4 rounded-2xl border border-blue-100 text-[10px] font-black text-blue-600 outline-none focus:border-blue-400 transition-all" />
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-6">
-                                    <div className="space-y-2">
-                                        <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4">WORK TYPE</label>
-                                        <select value={newTask.type} onChange={(e) => setNewTask({ ...newTask, type: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-200 text-[10px] font-black text-slate-700 outline-none">
-                                            <option value="PM">PREVENTIVE (PM)</option>
-                                            <option value="CM">CORRECTIVE (CM)</option>
-                                        </select>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4">ASSIGNED OPS ENGINEER</label>
-                                        <select required value={newTask.technician_id} onChange={(e) => setNewTask({ ...newTask, technician_id: e.target.value })} className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-200 text-[10px] font-black text-slate-700 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all">
-                                            <option value="">SELECT PERSONNEL...</option>
-                                            {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                                        </select>
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 ml-4">REASON / NOTES</label>
-                                    <input type="text" value={newTask.reason} onChange={(e) => setNewTask({ ...newTask, reason: e.target.value })} placeholder="Optional SLA reason..." className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-200 text-[10px] font-black text-slate-700 outline-none focus:border-blue-400 transition-all" />
-                                </div>
-                                <button disabled={isSaving} type="submit" className="w-full py-6 mt-6 bg-blue-600 text-white rounded-3xl font-black text-[11px] tracking-[0.4em] uppercase shadow-2xl shadow-blue-200 hover:bg-blue-700 hover:-translate-y-1 active:scale-95 transition-all disabled:opacity-50">
-                                    {isSaving ? 'EXECUTING SYNC...' : 'COMMIT NEW RECORD'}
-                                </button>
-                            </form>
-                        </motion.div>
-                    </div>
-                )}
-            </AnimatePresence>
-
-            <AnimatePresence>
-                {isPreviewModalOpen && (
-                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6">
-                        <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} className="bg-white rounded-none shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border border-white">
-                            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                                <div>
-                                    <div className="flex items-center gap-3 mb-1">
-                                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-ping" />
-                                        <h2 className="text-2xl font-[950] text-slate-900 tracking-tighter uppercase leading-none">Analysis Hub</h2>
-                                    </div>
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-5">Operational Integrity Protocol</p>
-                                </div>
-                                <button onClick={() => setIsPreviewModalOpen(false)} className="w-10 h-10 hover:bg-slate-100 rounded-xl flex items-center justify-center text-slate-300 hover:text-rose-500 transition-all border border-slate-100">✕</button>
-                            </div>
-
-                            <div className="flex-1 overflow-y-auto p-8 space-y-8">
-                                <div className="grid grid-cols-5 gap-4">
-                                    {[
-                                        { label: 'File Rows', val: importData.totalRows || 0, c: 'slate' },
-                                        { label: 'New Tasks', val: importData.newRecords.length, c: 'emerald' },
-                                        { label: 'Updates', val: importData.updateRecords.length, c: 'amber' },
-                                        { label: 'New Assets', val: importData.provisionedCount || 0, c: 'indigo' },
-                                        { label: 'Invalid', val: importData.invalidRecords?.length || 0, c: 'rose' }
-                                    ].map(s => (
-                                        <div key={s.label} className={`p-5 bg-${s.c}-50/30 border border-${s.c}-100 rounded-xl relative overflow-hidden group`}>
-                                            <div className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-1">{s.label}</div>
-                                            <div className={`text-2xl font-[950] text-${s.c}-600 tracking-tighter`}>{s.val}</div>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm font-bold">
-                                    <div className="max-h-[400px] overflow-y-auto">
-                                        <table className="w-full text-left text-[11px] uppercase tracking-tight">
-                                            <thead className="bg-white border-b border-slate-100 text-slate-300 sticky top-0 z-10">
-                                                <tr>
-                                                    <th className="px-6 py-6">ID TICKET</th>
-                                                    <th className="px-6 py-6">DESCRIPTION</th>
-                                                    <th className="px-6 py-6 text-center">PLAN</th>
-                                                    <th className="px-6 py-6 text-center font-black text-blue-500">TARGET</th>
-                                                    <th className="px-6 py-6 text-center">STATUS</th>
-                                                    <th className="px-6 py-6 text-right">TARGET TECH</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100/50 bg-white/40">
-                                                {importData.invalidRecords?.map((r, i) => (
-                                                    <tr key={`inv-${i}`} className="bg-rose-50/30 group">
-                                                        <td className="px-6 py-4 text-rose-600 font-mono italic">{r.tid_preview}</td>
-                                                        <td className="px-6 py-4 text-slate-400 truncate max-w-[150px]">{r.site_preview}</td>
-                                                        <td className="px-6 py-4 text-center text-rose-300 line-through">{formatDate(r.scheduled_date)}</td>
-                                                        <td className="px-6 py-4 text-center text-slate-200">---</td>
-                                                        <td className="px-6 py-4 text-center">
-                                                            <span className="px-2 py-1 bg-rose-600 text-white rounded text-[8px] font-black shadow-sm group-hover:animate-bounce">ERR: {r.reason}</span>
-                                                        </td>
-                                                        <td className="px-6 py-4 text-right opacity-40 italic">SKIPPED</td>
-                                                    </tr>
-                                                ))}
-                                                {importData.newRecords.map((r, i) => (
-                                                    <tr key={`new-${i}`} className="hover:bg-emerald-50/20">
-                                                        <td className="px-6 py-4 text-emerald-600 font-mono flex items-center gap-2">
-                                                            {r.tid_preview}
-                                                            {r.is_new_asset && <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded-[4px] text-[7px] font-black animate-pulse">NEW ASSET</span>}
-                                                        </td>
-                                                        <td className="px-6 py-4 text-slate-600 truncate max-w-[150px]">{r.site_preview}</td>
-                                                        <td className="px-6 py-4 text-center text-slate-400">{formatDate(r.scheduled_date)}</td>
-                                                        <td className="px-6 py-4 text-center text-blue-500 font-bold">{formatDate(r.target_date)}</td>
-                                                        <td className="px-6 py-4 text-center"><span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[9px] font-black">NEW TASK</span></td>
-                                                        <td className="px-6 py-4 text-right opacity-40 italic">{r.tech_preview}</td>
-                                                    </tr>
-                                                ))}
-                                                {importData.updateRecords.map((r, i) => (
-                                                    <tr key={`upd-${i}`} className="hover:bg-amber-50/20">
-                                                        <td className="px-6 py-4 text-amber-600 font-mono">{r.tid_preview}</td>
-                                                        <td className="px-6 py-4 text-slate-600 truncate max-w-[150px]">{r.site_preview}</td>
-                                                        <td className="px-6 py-4 text-center text-slate-400">{formatDate(r.scheduled_date)}</td>
-                                                        <td className="px-6 py-4 text-center text-blue-500 font-bold">{formatDate(r.target_date)}</td>
-                                                        <td className="px-6 py-4 text-center"><span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-[9px] font-black">UPDATE</span></td>
-                                                        <td className="px-6 py-4 text-right opacity-40 italic">{r.tech_preview}</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="p-8 bg-slate-50/80 backdrop-blur-xl border-t border-slate-100 flex gap-4">
-                                <button onClick={() => setIsPreviewModalOpen(false)} className="flex-1 py-5 bg-white border border-slate-200 text-slate-400 rounded-xl font-black text-[12px] tracking-[0.2em] uppercase hover:bg-slate-100 transition-all">Abort Sync</button>
-                                <button onClick={confirmImport} disabled={isSaving || (importData.newRecords.length === 0 && importData.updateRecords.length === 0)} className="flex-[2] bg-blue-600 text-white rounded-xl font-black text-[12px] tracking-[0.4em] uppercase shadow-lg shadow-blue-200 transition-all disabled:opacity-50">
-                                    {isSaving ? 'Processing...' : `Commit ${importData.newRecords.length + importData.updateRecords.length} Changes`}
-                                </button>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
-            </AnimatePresence>
-
-            {/* Context Menu Overlay */}
-            <AnimatePresence>
-                {contextMenu.visible && (
+            <AnimatePresence mode="wait">
+                {selectedTask ? (
+                    <TaskDetailView 
+                        key="detail"
+                        task={selectedTask} 
+                        onBack={() => setSelectedTask(null)} 
+                    />
+                ) : (
                     <motion.div 
-                        initial={{ opacity: 0, scale: 0.95 }} 
-                        animate={{ opacity: 1, scale: 1 }} 
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        className="fixed bg-white border border-slate-200 shadow-2xl rounded-xl py-2 z-[200] min-w-[160px] overflow-hidden"
-                        style={{ top: contextMenu.y, left: contextMenu.x }}
+                        key="dashboard"
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 20 }}
                     >
-                        <div className="px-4 py-2 text-[8px] font-black text-slate-300 uppercase tracking-widest border-b border-slate-50 mb-1">Sorting Control</div>
-                        <button onClick={() => requestSort(contextMenu.key, 'asc')} className="w-full px-4 py-2 text-left text-[10px] font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2 transition-all">
-                            <FiChevronUp size={14} /> Sort Ascending
-                        </button>
-                        <button onClick={() => requestSort(contextMenu.key, 'desc')} className="w-full px-4 py-2 text-left text-[10px] font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2 transition-all">
-                            <FiChevronDown size={14} /> Sort Descending
-                        </button>
-                        <button onClick={() => requestSort(contextMenu.key, 'clear')} className="w-full px-4 py-2 text-left text-[10px] font-bold text-rose-500 hover:bg-rose-50 flex items-center gap-2 transition-all border-t border-slate-50 mt-1">
-                            <FiMinus size={14} /> Clear Sort
-                        </button>
+                        <input type="file" ref={fileInputRef} onChange={handleExcelUpload} accept=".xlsx, .xls" className="hidden" />
+                        <input type="file" ref={targetFileInputRef} onChange={handleTargetExcelUpload} accept=".xlsx, .xls" className="hidden" />
+
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm mb-4 overflow-hidden">
+                            <MaintenanceHeader 
+                                typeFilter={typeFilter} searchTerm={searchTerm} setSearchTerm={setSearchTerm} 
+                                devMode={devMode} setDevMode={setDevMode} setModifiedTaskIds={setModifiedTaskIds} 
+                                onOpenAddModal={() => setIsModalOpen(true)} onImportAll={() => fileInputRef.current.click()} 
+                            />
+                            
+                            <div className="px-6 py-2 border-t border-slate-100 flex items-center justify-between bg-slate-50/20">
+                                <MaintenanceStats 
+                                    meetCount={stats.meetCount} 
+                                    missCount={stats.missCount} 
+                                    pendingCount={stats.pendingCount} 
+                                    totalCount={assets.length}
+                                    onExportTarget={handleExportTargetTemplate}
+                                    onImportTarget={() => targetFileInputRef.current.click()}
+                                    onStatClick={setActiveStatModal}
+                                />
+                            </div>
+
+                            <FilterBar 
+                                filterKanwil={filterKanwil} setFilterKanwil={setFilterKanwil} kanwils={kanwils} 
+                                filterTechnician={filterTechnician} setFilterTechnician={setFilterTechnician} technicians={technicians} 
+                                rowLimit={rowLimit} setRowLimit={setRowLimit} viewMode={viewMode} setViewMode={setViewMode} 
+                                onFetchTasks={fetchTasks} onExportExcel={handleExportPremiumExcel} 
+                                startDate={startDate} setStartDate={setStartDate}
+                                endDate={endDate} setEndDate={setEndDate}
+                                dateFilterField={dateFilterField} setDateFilterField={setDateFilterField}
+                                filterSla={filterSla} setFilterSla={setFilterSla}
+                                isAllPeriods={isAllPeriods} setIsAllPeriods={setIsAllPeriods}
+                            />
+                        </div>
+
+                        {viewMode === 'table' ? (
+                            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                                <TaskTable 
+                                    tasks={stats.filteredTasks} sortConfig={sortConfig} requestSort={requestSort} 
+                                    handleContextMenu={handleContextMenu} devMode={devMode} assets={assets} 
+                                    technicians={technicians} updateTaskField={updateTaskField} modifiedTaskIds={modifiedTaskIds} 
+                                    formatDate={formatDate}
+                                    onRowClick={handleRowClick}
+                                />
+                            </div>
+                        ) : (
+                            <TaskChart chartData={stats.chartData} />
+                        )}
+
+                        <AddTaskModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} newTask={newTask} setNewTask={setNewTask} isSaving={isSaving} onAdd={handleAddTask} assets={assets} technicians={technicians} />
+                        <ImportPreviewModal isOpen={isPreviewModalOpen} onClose={() => setIsPreviewModalOpen(false)} importData={importData} isSaving={isSaving} onConfirm={handleConfirmImport} />
+                        <TargetUpdateModal isOpen={isTargetPreviewModalOpen} onClose={() => setIsTargetPreviewModalOpen(false)} targetUpdateData={targetUpdateData} isSaving={isSaving} onConfirm={handleConfirmTargetUpdate} />
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Toast Notification stays global */}
+            <AnimatePresence>
+                {toast && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 20, scale: 0.9 }}
+                        className={`fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] px-6 py-3.5 rounded-2xl shadow-2xl border flex items-center gap-3 min-w-[300px] backdrop-blur-md ${toast.type === 'error' ? 'bg-rose-500/90 text-white border-rose-400' : 'bg-slate-900/90 text-white border-slate-700'}`}
+                    >
+                        <div className={`w-1.5 h-1.5 rounded-full ${toast.type === 'error' ? 'bg-white animate-pulse' : 'bg-emerald-400 animate-pulse'}`} />
+                        <span className="text-[11px] font-black uppercase tracking-widest">{toast.message}</span>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            <StatListModal 
+                isOpen={!!activeStatModal}
+                onClose={() => setActiveStatModal(null)}
+                type={activeStatModal}
+                onTaskClick={(task) => {
+                    setSelectedTask(task);
+                    setActiveStatModal(null);
+                }}
+            />
         </motion.div>
     );
 }

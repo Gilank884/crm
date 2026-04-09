@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 export default function Layout({ children }) {
     const [filter, setFilter] = useState('all');
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
     return (
         <div className="h-screen flex flex-col bg-slate-50 text-slate-900 font-sans antialiased overflow-hidden">
@@ -12,7 +13,7 @@ export default function Layout({ children }) {
 
             <div className="flex flex-1 overflow-hidden">
                 {/* Sidebar stays fixed on the left */}
-                <Sidebar />
+                <Sidebar isCollapsed={isSidebarCollapsed} onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)} />
 
                 {/* Only the main content area scrolls */}
                 <main className="flex-1 overflow-y-auto p-6 scroll-smooth">

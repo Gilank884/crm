@@ -1,8 +1,10 @@
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { FiHome, FiUsers, FiBox, FiCalendar, FiArrowRight, FiActivity } from 'react-icons/fi';
+import { FiHome, FiUsers, FiBox, FiCalendar, FiArrowRight, FiActivity, FiTool, FiAlertCircle } from 'react-icons/fi';
 import { supabase } from '../supabaseClient';
+import { gsap } from 'gsap';
+import { useRef } from 'react';
 import { 
     BarChart, 
     Bar, 
@@ -12,15 +14,45 @@ import {
     Tooltip, 
     ResponsiveContainer, 
     Cell,
-    Legend
+    Legend,
+    PieChart,
+    Pie,
+    Tooltip as RechartsTooltip
 } from 'recharts';
 
 const moduleConfig = [
     { name: 'Monitor Kanwil', path: '/kanwil', icon: FiHome, desc: 'Daftar Kantor Wilayah operasional', table: 'kanwils' },
     { name: 'Database Teknisi', path: '/technicians', icon: FiUsers, desc: 'Data personil per Kanwil', table: 'technicians' },
     { name: 'Master Data', path: '/assets', icon: FiBox, desc: 'Daftar site & aset tetap', table: 'managed_assets' },
-    { name: 'Monthly PM & CM', path: '/maintenance', icon: FiCalendar, desc: 'Tracking maintenance bulanan', table: 'maintenance_tasks' },
+    { name: 'Monthly PM', path: '/maintenance/pm', icon: FiCalendar, desc: 'Tracking Preventive Maintenance', table: 'maintenance_tasks' },
+    { name: 'Corrective Log', path: '/maintenance/cm', icon: FiTool, desc: 'Detailed repair logs & tickets', table: 'corrective_maintenance' },
 ];
+
+/**
+ * Animated Number Counter using GSAP
+ */
+const AnimatedCount = ({ value, duration = 1.5 }) => {
+    const countRef = useRef(null);
+    const displayedValue = useRef(0);
+
+    useEffect(() => {
+        const ctx = gsap.context(() => {
+            gsap.to(displayedValue, {
+                current: value,
+                duration: duration,
+                ease: "power3.out",
+                onUpdate: () => {
+                    if (countRef.current) {
+                        countRef.current.innerText = Math.round(displayedValue.current);
+                    }
+                }
+            });
+        });
+        return () => ctx.revert();
+    }, [value, duration]);
+
+    return <span ref={countRef}>0</span>;
+};
 
 export default function Dashboard() {
     const navigate = useNavigate();
@@ -28,8 +60,11 @@ export default function Dashboard() {
     const [chartData, setChartData] = useState([]);
     const [openTasks, setOpenTasks] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [globalStats, setGlobalStats] = useState({ meet: 0, miss: 0, pending: 0 });
     
-    // Date Range State
+    // GSAP Refs
+    const gridRef = useRef(null);
+    const headerRef = useRef(null);
     const [startDate, setStartDate] = useState(() => {
         const d = new Date();
         return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
@@ -113,10 +148,54 @@ export default function Dashboard() {
                         status === 'MEET' ? regionalMap[kanwilName].meet++ : regionalMap[kanwilName].miss++;
                     }
                 });
+                
+                const globalTotals = Object.values(regionalMap).reduce((acc, curr) => ({
+                    meet: acc.meet + curr.meet,
+                    miss: acc.miss + curr.miss,
+                    pending: acc.pending + curr.pending
+                }), { meet: 0, miss: 0, pending: 0 });
+                
+                setGlobalStats(globalTotals);
                 setChartData(Object.values(regionalMap).sort((a, b) => b.meet - a.meet));
 
-                // 5. Update Queue
                 setOpenTasks(queueResponse.data || []);
+
+                // 6. Fetch Strict Current Month for Top Chart (as per user request: "Bulan ini saja")
+                const d = new Date();
+                const firstDay = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+                const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+                
+                const { data: thisMonthData } = await supabase
+                    .from('maintenance_tasks')
+                    .select('scheduled_date, completed_date, target_date')
+                    .gte('scheduled_date', firstDay)
+                    .lte('scheduled_date', lastDay);
+
+                const stats = { meet: 0, miss: 0, pending: 0 };
+                (thisMonthData || []).forEach(task => {
+                    if (!task.scheduled_date || !task.completed_date) {
+                        stats.pending++;
+                    } else {
+                        const scheduled = new Date(task.scheduled_date);
+                        const completed = new Date(task.completed_date);
+                        let isMeet = false;
+                        if (task.target_date) {
+                            isMeet = completed <= new Date(task.target_date);
+                        } else {
+                            const diff = Math.floor(Math.abs(completed - scheduled) / (1000 * 60 * 60 * 24));
+                            isMeet = diff <= 7;
+                        }
+                        isMeet ? stats.meet++ : stats.miss++;
+                    }
+                });
+                setGlobalStats(stats);
+
+                // Start GSAP Entrance
+                gsap.fromTo(".dash-card", 
+                    { opacity: 0, y: 30, scale: 0.95 }, 
+                    { opacity: 1, y: 0, scale: 1, duration: 0.8, stagger: 0.1, ease: "back.out(1.7)", delay: 0.2 }
+                );
+
             } catch (err) {
                 console.error("Dashboard Fetch Error:", err);
             } finally {
@@ -128,21 +207,27 @@ export default function Dashboard() {
 
 
     return (
-        <div className="p-6 max-w-6xl mx-auto selection:bg-blue-100">
-            {/* COMPACT HEADER */}
-            <motion.div 
-                initial={{ opacity: 0, y: -10 }} 
-                animate={{ opacity: 1, y: 0 }} 
-                className="mb-8 border-b border-slate-100 pb-6 flex flex-col md:flex-row justify-between items-start md:items-end gap-6"
-            >
-                <div>
-                    <div className="flex items-center gap-2 mb-2">
-                        <span className="w-1.5 h-6 bg-blue-600 rounded-full" />
-                        <h1 className="text-3xl font-black tracking-tight text-slate-900 uppercase leading-none">Dashboard Overview</h1>
-                    </div>
-                </div>
+        <div className="relative min-h-screen bg-slate-50 selection:bg-blue-100 overflow-hidden font-inter">
+            {/* REALISTIC BACKGROUND AESTHETICS */}
+            <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-gradient-to-br from-blue-200/20 to-transparent rounded-full blur-[100px] pointer-events-none" />
+            <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gradient-to-br from-emerald-100/20 to-transparent rounded-full blur-[100px] pointer-events-none" />
 
-                <div className="flex bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm h-[46px] group hover:border-blue-500 transition-all">
+            <div className="relative p-6 max-w-6xl mx-auto z-10">
+                {/* COMPACT HEADER */}
+                <motion.div 
+                    initial={{ opacity: 0, y: -10 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    className="mb-8 pb-6 flex flex-col md:flex-row justify-between items-start md:items-end gap-6 relative"
+                >
+                    <div>
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="w-2 h-8 bg-blue-600 rounded-full shadow-[0_0_20px_rgba(37,_99,_235,_0.3)] transition-all" />
+                            <h1 className="text-3xl font-[1000] tracking-tight text-slate-900 uppercase leading-none">Dashboard Overview</h1>
+                        </div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-5">Central Command / Real-time Intelligence</p>
+                    </div>
+
+                    <div className="flex bg-white/70 backdrop-blur-xl border border-white rounded-3xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.04)] h-[50px] group hover:border-blue-400 transition-all">
                     <div className="flex items-center px-4 bg-slate-50 border-r border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest gap-2 group-hover:bg-blue-50 group-hover:text-blue-600 transition-all">
                          <FiCalendar /> Dari
                     </div>
@@ -164,35 +249,158 @@ export default function Dashboard() {
                 </div>
             </motion.div>
 
+            {/* MONTHLY PERFORMANCE DISTRIBUTION CHART (FIXED TO CURRENT MONTH) */}
+            <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="bg-white/80 backdrop-blur-2xl border border-white rounded-[2.5rem] p-10 mb-8 shadow-[0_20px_60px_rgba(0,0,0,0.03)] relative overflow-hidden group/chart"
+            >
+                {/* Visual Label for Fixed Period - Azure Edition */}
+                <div className="absolute top-0 right-0 px-8 py-3 bg-blue-600/10 backdrop-blur-md text-blue-600 text-[9px] font-[1000] uppercase tracking-[0.4em] rounded-bl-3xl border-l border-b border-blue-50">
+                    PERIOD: {new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+                </div>
+                <div className="flex flex-col lg:flex-row items-center gap-12">
+                    {/* Left: Chart */}
+                    <div className="relative w-full lg:w-72 h-72 flex-shrink-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie
+                                    data={[
+                                        { name: 'IN SLA', value: globalStats.meet, color: '#10b981' },
+                                        { name: 'OUT SLA', value: globalStats.miss, color: '#f43f5e' },
+                                        { name: 'PENDING', value: globalStats.pending, color: '#f59e0b' }
+                                    ]}
+                                    innerRadius={80}
+                                    outerRadius={110}
+                                    paddingAngle={8}
+                                    dataKey="value"
+                                    stroke="none"
+                                >
+                                    {[
+                                        { color: '#10b981' },
+                                        { color: '#f43f5e' },
+                                        { color: '#f59e0b' }
+                                    ].map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={entry.color} />
+                                    ))}
+                                </Pie>
+                                <RechartsTooltip 
+                                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', fontSize: '11px', fontWeight: '900', textTransform: 'uppercase' }}
+                                />
+                            </PieChart>
+                        </ResponsiveContainer>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Global Stats</span>
+                            <span className="text-3xl font-[1000] text-slate-900 leading-none mt-1">
+                                <AnimatedCount value={globalStats.meet + globalStats.miss + globalStats.pending} />
+                            </span>
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-1">Total Tasks</span>
+                        </div>
+                    </div>
+
+                    {/* Right: Breakdown Details */}
+                    <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
+                        <div 
+                            onClick={() => navigate('/maintenance/pm')}
+                            className="p-6 bg-emerald-50/30 border border-emerald-100 rounded-3xl hover:bg-emerald-50 transition-all cursor-pointer group"
+                        >
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                                <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">IN SLA Mastery</span>
+                            </div>
+                            <div className="flex items-end justify-between">
+                                <span className="text-3xl font-[1000] text-emerald-900 leading-none">
+                                    <AnimatedCount value={globalStats.meet} />
+                                </span>
+                                <div className="text-right">
+                                    <div className="text-[14px] font-black text-emerald-600">
+                                        <AnimatedCount value={Math.round((globalStats.meet / (globalStats.meet + globalStats.miss + globalStats.pending || 1)) * 100)} duration={2} />%
+                                    </div>
+                                    <div className="text-[8px] font-bold text-emerald-400 uppercase tracking-tight">Success Rate</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div 
+                            onClick={() => navigate('/maintenance/pm')}
+                            className="p-6 bg-rose-50/30 border border-rose-100 rounded-3xl hover:bg-rose-50 transition-all cursor-pointer group"
+                        >
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="w-2 h-2 rounded-full bg-rose-500" />
+                                <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest">OUT SLA Warning</span>
+                            </div>
+                            <div className="flex items-end justify-between">
+                                <span className="text-3xl font-[1000] text-rose-900 leading-none">
+                                    <AnimatedCount value={globalStats.miss} />
+                                </span>
+                                <div className="text-right">
+                                    <div className="text-[14px] font-black text-rose-600">
+                                        <AnimatedCount value={Math.round((globalStats.miss / (globalStats.meet + globalStats.miss + globalStats.pending || 1)) * 100)} duration={2} />%
+                                    </div>
+                                    <div className="text-[8px] font-bold text-rose-400 uppercase tracking-tight">Violation Rate</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div 
+                            onClick={() => navigate('/maintenance/pm')}
+                            className="p-6 bg-amber-50/30 border border-amber-100 rounded-3xl hover:bg-amber-50 transition-all cursor-pointer group"
+                        >
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="w-2 h-2 rounded-full bg-amber-500" />
+                                <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">In Progress</span>
+                            </div>
+                            <div className="flex items-end justify-between">
+                                <span className="text-3xl font-[1000] text-amber-900 leading-none">
+                                    <AnimatedCount value={globalStats.pending} />
+                                </span>
+                                <div className="text-right">
+                                    <div className="text-[14px] font-black text-amber-600">
+                                        <AnimatedCount value={Math.round((globalStats.pending / (globalStats.meet + globalStats.miss + globalStats.pending || 1)) * 100)} duration={2} />%
+                                    </div>
+                                    <div className="text-[8px] font-bold text-amber-400 uppercase tracking-tight">Active Queue</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </motion.div>
+
             {/* COMPACT MODULE GRID */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+            <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-10">
                 {moduleConfig.map((mod, idx) => (
                     <motion.button
                         key={mod.path}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: idx * 0.05 }}
                         onClick={() => navigate(mod.path)}
-                        className="group relative p-6 bg-white border border-slate-100 rounded-3xl hover:border-blue-500 hover:shadow-2xl hover:shadow-blue-500/10 transition-all duration-300 text-left shadow-sm flex flex-col gap-4 overflow-hidden h-full active:scale-[0.98]"
+                        className="dash-card group relative p-6 bg-white/70 backdrop-blur-xl border border-white rounded-[2.5rem] hover:border-blue-400 hover:shadow-[0_20px_50px_rgba(8,112,184,0.08)] transition-all duration-500 text-left shadow-[0_8px_30px_rgb(0,0,0,0.02)] flex flex-col gap-5 overflow-hidden h-full active:scale-[0.98]"
                     >
-                        <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 text-xl group-hover:bg-blue-600 group-hover:text-white transition-colors duration-300">
+                        {mod.name === 'Monthly PM' && (
+                            <div className="absolute top-4 right-4 text-[10px] font-black text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 opacity-0 group-hover:opacity-100 transition-opacity">
+                                TRACKING
+                            </div>
+                        )}
+                        
+                        <div className="w-14 h-14 bg-slate-50/50 backdrop-blur-md rounded-2xl border border-slate-100 flex items-center justify-center text-slate-400 text-xl group-hover:bg-blue-600 group-hover:text-white transition-all duration-500 shadow-sm group-hover:shadow-lg group-hover:shadow-blue-500/20 group-hover:scale-110 group-hover:rotate-6">
                             <mod.icon />
                         </div>
                         
                         <div>
-                            <h3 className="text-sm font-black text-slate-900 mb-1 uppercase tracking-tight">{mod.name}</h3>
-                            <p className="text-[10px] text-slate-400 font-bold leading-tight mb-4">{mod.desc}</p>
+                            <h3 className="text-[13px] font-[1000] text-slate-900 mb-1 uppercase tracking-tight group-hover:text-blue-600 transition-colors">{mod.name}</h3>
+                            <p className="text-[10px] text-slate-400 font-bold leading-tight mb-4 h-8 overflow-hidden">{mod.desc}</p>
                             
                             <div className="flex items-center justify-between mt-auto">
                                 {loading ? (
-                                    <div className="w-12 h-5 bg-slate-50 animate-pulse rounded-lg" />
+                                    <div className="w-16 h-6 bg-slate-50 animate-pulse rounded-xl" />
                                 ) : (
                                     <div className="flex items-center gap-2">
-                                        <span className="text-lg font-black text-blue-600">{counts[mod.name] || 0}</span>
-                                        <span className="text-[8px] text-slate-300 uppercase font-black tracking-widest">Records</span>
+                                        <span className="text-xl font-[1000] text-slate-900 group-hover:text-blue-600 transition-colors">
+                                            <AnimatedCount value={counts[mod.name] || 0} />
+                                        </span>
+                                        <span className="text-[9px] text-slate-300 uppercase font-black tracking-widest">Items</span>
                                     </div>
                                 )}
-                                <div className="p-2 bg-slate-50 rounded-lg text-slate-400 group-hover:text-blue-600 transition-colors">
+                                <div className="p-2.5 bg-slate-50 rounded-xl text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-all transform group-hover:translate-x-1 shadow-sm">
                                     <FiArrowRight fontSize={14} />
                                 </div>
                             </div>
@@ -206,31 +414,37 @@ export default function Dashboard() {
                 initial={{ opacity: 0, y: 10 }} 
                 animate={{ opacity: 1, y: 0 }} 
                 transition={{ delay: 0.3 }}
-                className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm"
+                className="bg-white/80 backdrop-blur-2xl border border-white rounded-[2.5rem] p-10 mb-8 shadow-[0_20px_60px_rgba(0,0,0,0.03)]"
             >
-                <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
-                    <div className="flex items-center gap-3">
-                        <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl shadow-sm border border-blue-100">
-                            <FiActivity fontSize={20} />
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-10 gap-6">
+                    <div className="flex items-center gap-4">
+                        <div className="p-4 bg-blue-50/50 backdrop-blur-md text-blue-600 rounded-[1.5rem] shadow-sm border border-blue-100/50">
+                            <FiActivity fontSize={24} />
                         </div>
                         <div>
-                            <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight leading-tight">Regional Performance Metrics</h2>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">SLA Compliance & Visit Progress By Kanwil</p>
+                            <h2 className="text-xl font-[1000] text-slate-900 uppercase tracking-tight leading-tight">Regional Performance Metrics</h2>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] leading-none mt-1.5">SLA Compliance & Visit Progress By Kanwil</p>
                         </div>
                     </div>
 
-                    <div className="flex gap-4">
-                        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl px-5 py-2 flex flex-col items-center">
-                            <span className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-0.5">Grand Total IN SLA</span>
-                            <span className="text-lg font-black text-emerald-700 leading-none">{chartData.reduce((acc, curr) => acc + curr.meet, 0)}</span>
+                    <div className="flex gap-4 flex-wrap">
+                        <div className="bg-emerald-50/50 backdrop-blur-md border border-emerald-100 rounded-2xl px-6 py-3 flex flex-col items-center shadow-sm">
+                            <span className="text-[9px] font-black text-emerald-600 uppercase tracking-[0.2em] mb-1">Grand IN SLA</span>
+                            <span className="text-2xl font-[1000] text-emerald-700 leading-none">
+                                <AnimatedCount value={chartData.reduce((acc, curr) => acc + curr.meet, 0)} />
+                            </span>
                         </div>
-                        <div className="bg-rose-50 border border-rose-100 rounded-2xl px-5 py-2 flex flex-col items-center">
-                            <span className="text-[8px] font-black text-rose-600 uppercase tracking-widest mb-0.5">Grand Total OUT SLA</span>
-                            <span className="text-lg font-black text-rose-700 leading-none">{chartData.reduce((acc, curr) => acc + curr.miss, 0)}</span>
+                        <div className="bg-rose-50/50 backdrop-blur-md border border-rose-100 rounded-2xl px-6 py-3 flex flex-col items-center shadow-sm">
+                            <span className="text-[9px] font-black text-rose-600 uppercase tracking-[0.2em] mb-1">Grand OUT SLA</span>
+                            <span className="text-2xl font-[1000] text-rose-700 leading-none">
+                                <AnimatedCount value={chartData.reduce((acc, curr) => acc + curr.miss, 0)} />
+                            </span>
                         </div>
-                        <div className="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-2 flex flex-col items-center">
-                            <span className="text-[8px] font-black text-amber-600 uppercase tracking-widest mb-0.5">Grand Total Pending</span>
-                            <span className="text-lg font-black text-amber-700 leading-none">{chartData.reduce((acc, curr) => acc + curr.pending, 0)}</span>
+                        <div className="bg-amber-50/50 backdrop-blur-md border border-amber-100 rounded-2xl px-6 py-3 flex flex-col items-center shadow-sm">
+                            <span className="text-[9px] font-black text-amber-600 uppercase tracking-[0.2em] mb-1">Grand Pending</span>
+                            <span className="text-2xl font-[1000] text-amber-700 leading-none">
+                                <AnimatedCount value={chartData.reduce((acc, curr) => acc + curr.pending, 0)} />
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -346,32 +560,32 @@ export default function Dashboard() {
                 initial={{ opacity: 0, y: 10 }} 
                 animate={{ opacity: 1, y: 0 }} 
                 transition={{ delay: 0.4 }}
-                className="mt-10 bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm"
+                className="mt-8 bg-white/80 backdrop-blur-2xl border border-white rounded-[2.5rem] p-10 shadow-[0_20px_60px_rgba(0,0,0,0.03)]"
             >
                 <div className="flex items-center justify-between mb-8">
                     <div>
-                        <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
-                             <div className="w-2 h-6 bg-blue-600 rounded-full" /> Prioritas Pengerjaan (Target Terdekat)
+                        <h2 className="text-xl font-[1000] text-slate-900 uppercase tracking-tight flex items-center gap-3">
+                             <div className="w-2 h-8 bg-blue-600 rounded-full shadow-[0_0_20px_rgba(37,_99,_235,_0.2)]" /> Prioritas Pengerjaan
                         </h2>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Pending schedules requiring field visit</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-2 ml-5">Pending schedules requiring immediate field visit</p>
                     </div>
                     <button 
                         onClick={() => navigate('/maintenance')}
-                        className="px-6 py-2 bg-slate-50 text-slate-500 rounded-xl font-black text-[10px] tracking-widest uppercase hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                        className="px-8 py-3 bg-blue-50 text-blue-600 rounded-2xl font-[1000] text-[10px] tracking-[0.2em] uppercase hover:bg-blue-600 hover:text-white transition-all shadow-sm border border-blue-100/50 active:scale-95"
                     >
-                        View Tracker
+                        Enter Tracker
                     </button>
                 </div>
 
-                <div className="overflow-x-auto">
+                <div className="overflow-hidden rounded-3xl border border-slate-100 shadow-sm">
                     <table className="w-full text-left">
-                        <thead className="bg-slate-50 text-slate-400 uppercase text-[9px] tracking-widest font-black border-b border-slate-100">
+                        <thead className="bg-slate-50/50 backdrop-blur-md text-slate-400 uppercase text-[9px] tracking-[0.3em] font-[1000] border-b border-slate-100">
                             <tr>
-                                <th className="px-6 py-4">Asset ID</th>
-                                <th className="px-6 py-4">Site Name</th>
-                                <th className="px-6 py-4 text-center">Category</th>
-                                <th className="px-6 py-4 text-center text-blue-600">Target Date</th>
-                                <th className="px-6 py-4 text-right">Action</th>
+                                <th className="px-8 py-5">Asset Intelligence</th>
+                                <th className="px-8 py-5">Site Visibility</th>
+                                <th className="px-8 py-5 text-center">Category</th>
+                                <th className="px-8 py-5 text-center text-blue-600">Strategic Target</th>
+                                <th className="px-8 py-5 text-right font-inter">View</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50 font-bold">
@@ -402,12 +616,12 @@ export default function Dashboard() {
                                                 })() : 'NO TARGET'}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 text-right">
+                                        <td className="px-8 py-5 text-right font-inter">
                                             <button 
                                                 onClick={() => navigate('/maintenance')}
-                                                className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-sm"
+                                                className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-sm active:scale-90"
                                             >
-                                                <FiArrowRight fontSize={14} />
+                                                <FiArrowRight fontSize={16} />
                                             </button>
                                         </td>
                                     </tr>
@@ -417,6 +631,7 @@ export default function Dashboard() {
                     </table>
                 </div>
             </motion.div>
+            </div>
         </div>
     );
 }
