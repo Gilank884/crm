@@ -140,11 +140,19 @@ const PreviewRow = ({ row, type, formatDate, isInvalid = false }) => {
                     {row.reason}
                 </div>
             ) : (
-                <div className="text-right">
-                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Status Ticket</span>
-                    <span className={`px-3 py-1 text-[9px] font-black rounded-lg border tracking-tighter uppercase whitespace-nowrap ${row.work_status === 'FINISH' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
-                        {row.work_status || 'OPEN'}
-                    </span>
+                <div className="text-right flex items-center gap-4">
+                    {row.finished_at && (
+                        <div className="text-right">
+                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-0.5 whitespace-nowrap">Tgl Selesai</span>
+                            <span className="text-[10px] font-black text-emerald-600 font-mono tracking-tighter">{formatDate(row.finished_at)}</span>
+                        </div>
+                    )}
+                    <div className="text-right">
+                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Status Ticket</span>
+                        <span className={`px-3 py-1 text-[9px] font-black rounded-lg border tracking-tighter uppercase whitespace-nowrap ${row.work_status === 'FINISH' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
+                            {row.work_status || 'OPEN'}
+                        </span>
+                    </div>
                 </div>
             )}
         </div>

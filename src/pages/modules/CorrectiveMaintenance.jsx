@@ -220,8 +220,37 @@ export default function CorrectiveMaintenance() {
             
             const existingMap = {};
             existingTickets?.forEach(t => {
-                if (t.bit_ticket_number) existingMap[nK(t.bit_ticket_number)] = t.id;
+                if (t.bit_ticket_number) {
+                    existingMap[nK(t.bit_ticket_number)] = t.id;
+                }
             });
+
+            // Auto-provision missing TIDs (Match PM behavior)
+            const missingTidInfo = new Map();
+            data.forEach(item => {
+                const norm = {};
+                Object.keys(item).forEach(k => norm[nK(k)] = item[k]);
+                const tid = nK(norm['TID']);
+                const kwName = nK(norm['KANWIL'] || norm['KANWIIL']);
+                
+                if (tid && !assetMap[tid]) {
+                    missingTidInfo.set(tid, {
+                        tid: tid,
+                        name: norm['LOKASI'] || norm['SITE'] || 'Auto-Provisioned Site',
+                        kc_supervisi: norm['KC SUPERVISI'] || '',
+                        kanwil_id: kwMap[kwName] || null
+                    });
+                }
+            });
+
+            if (missingTidInfo.size > 0) {
+                const newAssets = Array.from(missingTidInfo.values());
+                const { data: provisioned } = await supabase.from('managed_assets').insert(newAssets).select('id, tid');
+                provisioned?.forEach(a => {
+                    assetMap[nK(a.tid)] = a.id;
+                    assetNameMap[nK(a.tid)] = missingTidInfo.get(nK(a.tid)).name;
+                });
+            }
 
             const newRecords = [];
             const updateRecords = [];
@@ -261,7 +290,13 @@ export default function CorrectiveMaintenance() {
                     site_preview: assetNameMap[tid] || norm['LOKASI'] || 'Unknown',
                 };
 
-                if (!row.asset_id) {
+                // Auto-set status if finished date is present
+                if (row.finished_at) {
+                    row.work_status = 'FINISH';
+                }
+
+                const assetId = row.asset_id;
+                if (!assetId) {
                     invalidRecords.push({ ...row, reason: `TID ${tid} tidak ditemukan di database` });
                 } else if (ticketNum && existingMap[ticketNum]) {
                     updateRecords.push({ ...row, id: existingMap[ticketNum] });
@@ -295,19 +330,19 @@ export default function CorrectiveMaintenance() {
             const toInsert = pendingImportData.newRecords.map(clean);
             const toUpdate = pendingImportData.updateRecords.map(clean);
 
-            let successCount = 0;
+            let totalCount = 0;
             if (toInsert.length > 0) {
                 const { error: insErr } = await supabase.from('corrective_maintenance').insert(toInsert);
                 if (insErr) throw insErr;
-                successCount += toInsert.length;
+                totalCount += toInsert.length;
             }
             if (toUpdate.length > 0) {
                 const { error: updErr } = await supabase.from('corrective_maintenance').upsert(toUpdate);
                 if (updErr) throw updErr;
-                successCount += toUpdate.length;
+                totalCount += toUpdate.length;
             }
 
-            alert(`Berhasil mengimpor ${successCount} data CM.`);
+            alert(`Berhasil sinkronisasi ${totalCount} data CM.`);
             setIsImportModalOpen(false);
             setPendingImportData(null);
             fetchTasks();
