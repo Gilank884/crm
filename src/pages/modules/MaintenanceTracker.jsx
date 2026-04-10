@@ -102,7 +102,8 @@ export default function MaintenanceTracker({ typeFilter }) {
             .order('scheduled_date', { ascending: true })
             .limit(rowLimit === 'all' ? 10000 : rowLimit);
 
-        if (typeFilter) taskQuery.eq('type', typeFilter);
+        if (typeFilter) taskQuery = taskQuery.eq('type', typeFilter);
+        if (filterKanwil !== 'all') taskQuery = taskQuery.eq('managed_assets.kanwil_id', filterKanwil);
 
         const [assetRes, techRes, kwRes, taskRes] = await Promise.all([
             supabase.from('managed_assets').select('id, name, tid').order('name'),
@@ -115,11 +116,7 @@ export default function MaintenanceTracker({ typeFilter }) {
         setTechnicians(techRes.data || []);
         setKanwils(kwRes.data || []);
         
-        let filtered = taskRes.data || [];
-        if (filterKanwil !== 'all') {
-            filtered = filtered.filter(t => t.managed_assets?.kanwils?.id === filterKanwil);
-        }
-        setTasks(filtered);
+        setTasks(taskRes.data || []);
         setLoading(false);
     }
 
@@ -140,17 +137,14 @@ export default function MaintenanceTracker({ typeFilter }) {
         if (typeFilter) query = query.eq('type', typeFilter);
         query = query.order('scheduled_date', { ascending: true }).limit(limitVal === 'all' ? 10000 : limitVal);
         if (techId !== 'all') query = query.eq('technician_id', techId);
+        if (kanwilId !== 'all') query = query.eq('managed_assets.kanwil_id', kanwilId);
 
         const { data, error } = await query;
         if (error) {
             console.error(error);
             setTasks([]);
         } else {
-            let filtered = data || [];
-            if (kanwilId !== 'all') {
-                filtered = filtered.filter(t => t.managed_assets?.kanwils?.id === kanwilId);
-            }
-            setTasks(filtered);
+            setTasks(data || []);
         }
         setLoading(false);
     }
