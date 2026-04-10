@@ -30,13 +30,13 @@ export default function TechnicianManager() {
     const [performanceData, setPerformanceData] = useState([]);
 
     const getPerformanceStatus = (task) => {
-        if (!task.scheduled_date) return 'PENDING';
+        if (!task.scheduled_date) return 'ON PROGRESS';
         const scheduled = new Date(task.scheduled_date);
         const completed = task.completed_date ? new Date(task.completed_date) : null;
         const now = new Date();
         const taskMonthYear = scheduled.getFullYear() * 12 + scheduled.getMonth();
         const currentMonthYear = now.getFullYear() * 12 + now.getMonth();
-        if (!completed) return (taskMonthYear < currentMonthYear) ? 'MISS' : 'PENDING';
+        if (!completed) return (taskMonthYear < currentMonthYear) ? 'MISS' : 'ON PROGRESS';
         const diffInDays = Math.floor(Math.abs(completed - scheduled) / (1000 * 60 * 60 * 24));
         const completedMonthYear = completed.getFullYear() * 12 + completed.getMonth();
         if (completedMonthYear > taskMonthYear) return 'MISS';

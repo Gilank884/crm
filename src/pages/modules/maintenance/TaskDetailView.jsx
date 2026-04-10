@@ -73,7 +73,7 @@ const TaskDetailView = ({ task, onBack }) => {
                             <div className="p-10 grid grid-cols-2 md:grid-cols-4 gap-8">
                                 <BigStat label="Scheduled" val={formatDate(task.scheduled_date)} icon={<FiCalendar className="text-blue-500" />} />
                                 <BigStat label="Target" val={formatDate(task.target_date)} icon={<FiClock className="text-emerald-500" />} />
-                                <BigStat label="Completed" val={task.completed_date ? formatDate(task.completed_date) : 'Pending'} icon={<FiCheckCircle className={task.completed_date ? "text-blue-500" : "text-slate-200"} />} />
+                                <BigStat label="Completed" val={task.completed_date ? formatDate(task.completed_date) : 'On Progress'} icon={<FiCheckCircle className={task.completed_date ? "text-blue-500" : "text-slate-200"} />} />
                                 <BigStat label="Aging" val={`${aging} Days`} icon={<FiActivity className="text-rose-500" />} />
                             </div>
                         </div>
@@ -206,7 +206,7 @@ const SLAChip = ({ status }) => {
     const styles = {
         'MEET': 'bg-emerald-500 text-white shadow-xl shadow-emerald-500/30',
         'MISS': 'bg-rose-500 text-white shadow-xl shadow-rose-500/30',
-        'PENDING': 'bg-slate-500 text-white shadow-xl shadow-slate-500/30'
+        'ON PROGRESS': 'bg-slate-500 text-white shadow-xl shadow-slate-500/30'
     };
     return (
         <span className={`px-5 py-2 rounded-xl text-[10px] font-black tracking-[0.2em] uppercase ${styles[status]}`}>

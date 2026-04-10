@@ -58,7 +58,7 @@ const StatListModal = ({ isOpen, onClose, type, onTaskClick }) => {
     const getStatusLabel = () => {
         if (type === 'MEET') return 'IN SLA (MEET)';
         if (type === 'MISS') return 'OUT SLA (MISS)';
-        return 'IN PROGRESS';
+        return 'ON PROGRESS';
     };
 
     return (

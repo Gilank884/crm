@@ -52,7 +52,7 @@ export default function MaintenanceTracker({ typeFilter }) {
     const [sortConfig, setSortConfig] = useState({ key: 'scheduled_date', direction: 'desc' });
     const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, key: null });
     const [isAllPeriods, setIsAllPeriods] = useState(false);
-    const [rowLimit, setRowLimit] = useState(100);
+    const [rowLimit, setRowLimit] = useState(20);
     const [viewMode, setViewMode] = useState('table');
 
     const [newTask, setNewTask] = useState({ 
@@ -63,7 +63,7 @@ export default function MaintenanceTracker({ typeFilter }) {
         target_date: '',
         reason: '',
         scheduled_date: '',
-        status: 'pending' 
+        status: 'on progress' 
     });
 
     const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
@@ -73,7 +73,7 @@ export default function MaintenanceTracker({ typeFilter }) {
     const [importData, setImportData] = useState({ newRecords: [], updateRecords: [], skipCount: 0, openCount: 0, closedCount: 0, provisionedCount: 0, totalRows: 0 });
 
     const [selectedTask, setSelectedTask] = useState(null);
-    const [activeStatModal, setActiveStatModal] = useState(null); // 'MEET', 'MISS', 'PENDING'
+    const [activeStatModal, setActiveStatModal] = useState(null); // 'MEET', 'MISS', 'ON PROGRESS'
 
     const showToast = (message, type = 'success') => {
         setToast({ message, type });
@@ -244,7 +244,7 @@ export default function MaintenanceTracker({ typeFilter }) {
             const total = d.total || 1;
             return {
                 name: MONTH_NAMES[parseInt(ym.split('-')[1]) - 1] || ym,
-                'IN SLA': Math.round((d.meet / total) * 100), 'OUT SLA': Math.round((d.miss / total) * 100), 'IN PROGRESS': Math.round((d.pending / total) * 100),
+                'IN SLA': Math.round((d.meet / total) * 100), 'OUT SLA': Math.round((d.miss / total) * 100), 'ON PROGRESS': Math.round((d.pending / total) * 100),
                 meetRaw: d.meet, missRaw: d.miss, pendingRaw: d.pending, totalRaw: d.total
             };
         });
@@ -322,7 +322,7 @@ export default function MaintenanceTracker({ typeFilter }) {
                     taskData.completed_date = visitDate;
                     taskData.status = 'completed';
                 } else {
-                    taskData.status = 'pending';
+                    taskData.status = 'on progress';
                 }
 
                 const existing = existingMap[`${assetId}_${scheduledDate}`];
@@ -354,7 +354,7 @@ export default function MaintenanceTracker({ typeFilter }) {
 
     async function handleAddTask(e) {
         e.preventDefault(); setIsSaving(true);
-        const taskToInsert = { ...newTask, period: newTask.scheduled_date.slice(0, 7), status: newTask.completed_date ? 'completed' : 'pending' };
+        const taskToInsert = { ...newTask, period: newTask.scheduled_date.slice(0, 7), status: newTask.completed_date ? 'completed' : 'on progress' };
         const { error } = await supabase.from('maintenance_tasks').insert([taskToInsert]);
         if (error) alert(`Error: ${error.message}`); else { setIsModalOpen(false); fetchTasks(); }
         setIsSaving(false);

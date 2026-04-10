@@ -34,11 +34,11 @@ const Stats = ({ meetCount, missCount, pendingCount, totalCount, onExportTarget,
 
             {/* Stat Card 3 */}
             <div 
-                onClick={() => onStatClick?.('PENDING')}
+                onClick={() => onStatClick?.('ON PROGRESS')}
                 className="bg-white border border-slate-200 rounded-xl px-6 py-3 flex items-center justify-between shadow-sm group hover:border-amber-200 cursor-pointer active:scale-95 transition-all"
             >
                 <div className="flex flex-col">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 group-hover:text-amber-600 transition-colors">PROGRESS</span>
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 group-hover:text-amber-600 transition-colors">ON PROGRESS</span>
                     <span className="text-2xl font-black text-slate-800 leading-none tabular-nums group-hover:text-amber-700 transition-colors">{pendingCount}</span>
                 </div>
                 <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-500">

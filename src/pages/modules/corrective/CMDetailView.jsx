@@ -270,7 +270,7 @@ const CMDetailView = ({ task, onBack, formatDate, kanwils = [], technicians = []
                                icon={<FiShield className="text-emerald-600" />} 
                                isEdit={isEditMode}
                                type="select"
-                               options={[{value: 'PENDING', label: 'PENDING'}, {value: 'APPROVED', label: 'APPROVED'}, {value: 'REJECTED', label: 'REJECTED'}]}
+                               options={[{value: 'ON PROGRESS', label: 'ON PROGRESS'}, {value: 'APPROVED', label: 'APPROVED'}, {value: 'REJECTED', label: 'REJECTED'}]}
                                currentValue={task.approval}
                                onUpdate={(v) => handleChange('approval', v)}
                            />
@@ -374,7 +374,7 @@ const StatusBadge = ({ label, type, isEdit, onChange }) => {
     let colorClass = 'bg-slate-50 text-slate-500 border-slate-200';
     if (val === 'OPEN') colorClass = isTicket ? 'bg-white text-slate-600 border-slate-800' : 'bg-blue-600 text-white shadow-lg shadow-blue-500/10';
     if (val === 'CLOSED' || val === 'FINISH') colorClass = 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/10';
-    if (val === 'PENDING') colorClass = 'bg-amber-600 text-white shadow-lg shadow-amber-500/10';
+    if (val === 'ON PROGRESS') colorClass = 'bg-amber-600 text-white shadow-lg shadow-amber-500/10';
 
     return (
         <div className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest flex flex-col items-center justify-center leading-none ${colorClass}`}>

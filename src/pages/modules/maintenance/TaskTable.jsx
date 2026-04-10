@@ -196,7 +196,7 @@ const TaskTable = ({
                                         />
                                     ) : (
                                         <span className={`text-[10px] font-bold font-mono tracking-tight ${t.completed_date ? 'text-blue-600' : 'text-slate-200 italic'}`}>
-                                            {t.completed_date ? formatDate(t.completed_date) : 'PEN'}
+                                            {t.completed_date ? formatDate(t.completed_date) : 'PRG'}
                                         </span>
                                     )}
                                 </td>
@@ -232,7 +232,7 @@ const SLAChip = ({ status }) => {
     const styles = {
         'MEET': 'bg-emerald-100/40 text-emerald-700 border-emerald-200',
         'MISS': 'bg-rose-100/40 text-rose-700 border-rose-200',
-        'PENDING': 'bg-slate-100 text-slate-500 border-slate-200'
+        'ON PROGRESS': 'bg-slate-100 text-slate-500 border-slate-200'
     };
     return (
         <span className={`px-2.5 py-1 rounded-full text-[8.5px] font-[900] border tracking-wider whitespace-nowrap shadow-sm ${styles[status]}`}>

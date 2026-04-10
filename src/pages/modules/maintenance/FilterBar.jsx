@@ -121,12 +121,12 @@ const FilterBar = ({
                     <select 
                         value={filterSla} 
                         onChange={(e) => setFilterSla(e.target.value)} 
-                        className={`px-3 py-1.5 rounded-xl text-[10px] font-black outline-none cursor-pointer transition-all uppercase tracking-tight border ${filterSla === 'MEET' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : filterSla === 'MISS' ? 'bg-rose-50 text-rose-700 border-rose-200' : filterSla === 'PENDING' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-200'}`}
+                        className={`px-3 py-1.5 rounded-xl text-[10px] font-black outline-none cursor-pointer transition-all uppercase tracking-tight border ${filterSla === 'MEET' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : filterSla === 'MISS' ? 'bg-rose-50 text-rose-700 border-rose-200' : filterSla === 'ON PROGRESS' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-200'}`}
                     >
                         <option value="all">SLA: ALL STATUS</option>
                         <option value="MEET">IN SLA</option>
                         <option value="MISS">OUT SLA</option>
-                        <option value="PENDING">PROGRESS</option>
+                        <option value="ON PROGRESS">ON PROGRESS</option>
                     </select>
                 </div>
 
@@ -145,6 +145,7 @@ const FilterBar = ({
                     className="bg-white border border-slate-200 px-4 py-1.5 rounded-xl text-[10px] font-black text-slate-600 outline-none cursor-pointer hover:bg-slate-50 hover:border-blue-200 transition-all shadow-sm uppercase"
                     title="Limit Dataset"
                 >
+                    <option value={20}>LIMIT: 20</option>
                     <option value={50}>LIMIT: 50</option>
                     <option value={100}>LIMIT: 100</option>
                     <option value={200}>LIMIT: 200</option>

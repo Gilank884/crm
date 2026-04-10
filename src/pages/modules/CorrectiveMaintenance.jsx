@@ -77,9 +77,10 @@ export default function CorrectiveMaintenance() {
     const [searchTerm, setSearchTerm] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [rowLimit, setRowLimit] = useState(100);
+    const [rowLimit, setRowLimit] = useState(20);
     const [showAllDates, setShowAllDates] = useState(false);
     const [selectedTask, setSelectedTask] = useState(null);
+    const [filterWorkStatus, setFilterWorkStatus] = useState('ALL'); // ALL, OPEN (Belum Selesai)
 
     // Relational Data
     const [kanwils, setKanwils] = useState([]);
@@ -101,7 +102,7 @@ export default function CorrectiveMaintenance() {
         asset_id: '', technician_id: '', kanwil_id: '',
         supervisor_kc: '', problem_part: '', ticket_status: 'OPEN', 
         action: '', pic_uker: '', ticket_link: '', work_status: 'OPEN', 
-        notes: '', schedule: '', reference: '', approval: 'PENDING', finished_at: null,
+        notes: '', schedule: '', reference: '', approval: 'ON PROGRESS', finished_at: null,
         evident: null
     });
 
@@ -181,16 +182,24 @@ export default function CorrectiveMaintenance() {
     };
 
     const filteredTasks = useMemo(() => {
+        let result = tasks;
+
+        // Apply Status Filter
+        if (filterWorkStatus === 'OPEN') {
+            result = result.filter(t => !t.finished_at);
+        }
+
+        // Apply Search Term Filter
         const s = searchTerm.toLowerCase();
-        if (!s) return tasks;
-        return tasks.filter(t => 
+        if (!s) return result;
+        return result.filter(t => 
             t.managed_assets?.tid?.toLowerCase()?.includes(s) ||
             t.managed_assets?.name?.toLowerCase()?.includes(s) ||
             t.bit_ticket_number?.toLowerCase()?.includes(s) ||
             t.technicians?.name?.toLowerCase()?.includes(s) ||
             t.kanwils?.name?.toLowerCase()?.includes(s)
         );
-    }, [tasks, searchTerm]);
+    }, [tasks, searchTerm, filterWorkStatus]);
 
     const handleExcelUpload = async (e) => {
         const file = e.target.files[0];
@@ -323,7 +332,7 @@ export default function CorrectiveMaintenance() {
                 asset_id: '', technician_id: '', kanwil_id: '',
                 supervisor_kc: '', problem_part: '', ticket_status: 'OPEN', 
                 action: '', pic_uker: '', ticket_link: '', work_status: 'OPEN', 
-                notes: '', schedule: '', reference: '', approval: 'PENDING', finished_at: null,
+                notes: '', schedule: '', reference: '', approval: 'ON PROGRESS', finished_at: null,
                 evident: null
             });
         }
@@ -392,7 +401,9 @@ export default function CorrectiveMaintenance() {
                             setShowAllDates={setShowAllDates}
                             rowLimit={rowLimit}
                             setRowLimit={setRowLimit}
-                            tasksCount={tasks.length}
+                            filterWorkStatus={filterWorkStatus}
+                            setFilterWorkStatus={setFilterWorkStatus}
+                            tasksCount={filteredTasks.length}
                             totalDbCount={totalDbCount}
                         />
 

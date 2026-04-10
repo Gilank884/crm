@@ -20,7 +20,7 @@ const TaskChart = ({ chartData }) => {
                     </div>
                     <div className="flex items-center gap-2">
                         <div className="w-3 h-3 bg-slate-400 rounded-sm shadow-sm shadow-slate-400/20" />
-                        <span className="text-[9px] font-black text-slate-600 tracking-wider">PENDING</span>
+                        <span className="text-[9px] font-black text-slate-600 tracking-wider">ON PROGRESS</span>
                     </div>
                 </div>
             </div>
@@ -83,7 +83,7 @@ const TaskChart = ({ chartData }) => {
                             fill="#f43f5e" 
                         />
                         <Bar 
-                            dataKey="IN PROGRESS" 
+                            dataKey="ON PROGRESS" 
                             stackId="a" 
                             fill="#94a3b8" 
                             radius={[6, 6, 0, 0]}

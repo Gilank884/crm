@@ -65,7 +65,7 @@ export const formatDate = (iso) => {
 };
 
 export const getPerformanceStatus = (task) => {
-    if (!task.scheduled_date) return 'PENDING';
+    if (!task.scheduled_date) return 'ON PROGRESS';
 
     const scheduled = new Date(task.scheduled_date);
     const completed = task.completed_date ? new Date(task.completed_date) : null;
@@ -76,7 +76,7 @@ export const getPerformanceStatus = (task) => {
     const isPastMonth = taskMonthYear < currentMonthYear;
 
     if (!completed) {
-        return isPastMonth ? 'MISS' : 'PENDING';
+        return isPastMonth ? 'MISS' : 'ON PROGRESS';
     }
 
     const diffInDays = Math.floor(Math.abs(completed - scheduled) / (1000 * 60 * 60 * 24));

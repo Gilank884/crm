@@ -10,6 +10,8 @@ const CMFilters = ({
     setShowAllDates,
     rowLimit,
     setRowLimit,
+    filterWorkStatus,
+    setFilterWorkStatus,
     tasksCount,
     totalDbCount
 }) => {
@@ -50,10 +52,20 @@ const CMFilters = ({
                 </div>
                 <div className="h-6 w-px bg-slate-200 mx-2" />
                 <select 
+                    value={filterWorkStatus} 
+                    onChange={(e) => setFilterWorkStatus(e.target.value)} 
+                    className={`px-3 py-1.5 rounded-lg text-[8px] font-black outline-none cursor-pointer transition-all uppercase tracking-tight border ${filterWorkStatus === 'OPEN' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-white text-slate-400 border-slate-200 hover:border-blue-200'}`}
+                >
+                    <option value="ALL">ALL STATUS</option>
+                    <option value="OPEN">BELUM SELESAI</option>
+                </select>
+                <div className="h-6 w-px bg-slate-200 mx-2" />
+                <select 
                     value={rowLimit} 
                     onChange={(e) => setRowLimit(e.target.value)} 
                     className="bg-transparent border-none text-[9px] font-bold text-slate-600 outline-none cursor-pointer uppercase tracking-widest"
                 >
+                    <option value={20}>Limit 20</option>
                     <option value={50}>Limit 50</option>
                     <option value={100}>Limit 100</option>
                     <option value="all">Unlimited</option>
